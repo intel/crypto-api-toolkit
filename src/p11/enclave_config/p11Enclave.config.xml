@@ -1,0 +1,14 @@
+<EnclaveConfiguration>
+  <ProdID>0</ProdID>
+  <ISVSVN>1</ISVSVN>
+  <StackMaxSize>0x40000</StackMaxSize>
+  <!--Default 1MB heap size is modified to support 80MB heap size.
+   Regarding the MAX/usage limit: the combined HeapMaxSize of all enclaves loaded
+   at the same time cannot exceed ~90MB for the default 128MB SGX BIOS setting.-->
+  <HeapMaxSize>0x5000000</HeapMaxSize>
+  <TCSNum>1</TCSNum>
+  <TCSPolicy>1</TCSPolicy>
+  <DisableDebug>0</DisableDebug>
+  <MiscSelect>0</MiscSelect>
+  <MiscMask>0xFFFFFFFF</MiscMask>
+</EnclaveConfiguration>
