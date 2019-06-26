@@ -45,9 +45,9 @@ namespace CryptoSgx
      */
     struct AsymmetricKey
     {
-        uint32_t    pairKeyId;
+        uint32_t    pairKeyId{0};
         bool        isUsedForWrapping = false;
-        RSA*        key;
+        RSA*        key{nullptr};
     };
 
     /**

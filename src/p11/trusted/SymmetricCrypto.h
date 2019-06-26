@@ -68,6 +68,10 @@ namespace CryptoSgx
          */
         SymmetricCrypto() = default;
 
+        SymmetricCrypto(const SymmetricCrypto& other) = delete;
+
+        SymmetricCrypto& operator=(const SymmetricCrypto& other) = delete;
+
         /**
          * Generate the symmetric key for the input key size
          * @param keyId         The key Id from provider.
@@ -129,7 +133,7 @@ namespace CryptoSgx
          * @return  bool        True if the EVP state associated with keyId is present, false otherwise
          */
         bool getEVPCtxState(const uint32_t& keyId,
-                            EVPCtxState&    evpContext);
+                            EVPCtxState*    evpContext);
 
         /**
          * Gets an IPP state from the cache
@@ -138,7 +142,7 @@ namespace CryptoSgx
          * @return  bool            True if the IPP state associated with keyId is present, false otherwise
          */
         bool getIppCtxState(const uint32_t& keyId,
-                            IppCtxState&    ippCtxContext);
+                            IppCtxState*    ippCtxContext);
 
         /**
         * Platform binds a symmetric key associated with Key Id passed.
@@ -202,7 +206,7 @@ namespace CryptoSgx
         * @return          True is the operation was successful, false otherwise
         */
         bool getSymmetricKey(const uint32_t&    keyId,
-                             SymmetricKey&      key);
+                             SymmetricKey*      key);
 
         /**
          * Initializes the encryption process.
@@ -222,7 +226,7 @@ namespace CryptoSgx
                               const uint8_t*          iv,
                               const uint32_t&         ivSize,
                               const uint8_t*          aad,
-                              uint32_t                aadSize,
+                              const uint32_t&         aadSize,
                               const uint32_t&         padding,
                               const uint32_t&         tagBits,
                               const int&              counterBits);
@@ -275,7 +279,7 @@ namespace CryptoSgx
                               const uint8_t*          iv,
                               const uint32_t&         ivSize,
                               const uint8_t*          aad,
-                              uint32_t                aadSize,
+                              const uint32_t&         aadSize,
                               const uint32_t&         padding,
                               const uint32_t&         tagBits,
                               const int&              counterBits);
@@ -364,7 +368,7 @@ namespace CryptoSgx
                                         uint8_t*            destBuffer,
                                         const uint32_t&     destBufferLen,
                                         uint32_t*           destBufferWritten,
-                                        IppCtxState&        ippCtxState,
+                                        IppCtxState*        ippCtxState,
                                         bool                doFullEncryptWithoutFinal = false);
 
         /**
@@ -388,7 +392,7 @@ namespace CryptoSgx
         SgxCryptStatus encryptFinalIpp(const uint32_t& keyId,
                                        uint8_t*        destBuffer,
                                        uint32_t*       destBufferWritten,
-                                       IppCtxState&    ippCtxState);
+                                       IppCtxState*    ippCtxState);
 
         /**
          * Initializes the IPP decryption process.
@@ -419,13 +423,13 @@ namespace CryptoSgx
         * @param    doFullDecryptWithoutFinal  Boolean value, if true, the operation is also finalized by calling decryptFinal() in this function
         * @return   SgxCryptStatus             SGX_CRYPT_STATUS_SUCCESS when success or error code otherwise
         */
-        SgxCryptStatus decryptUpdateEvp(const uint32_t&     keyId,
-                                        const uint8_t*      sourceBuffer,
-                                        const uint32_t&     sourceBufferLen,
-                                        uint8_t*            destBuffer,
-                                        const uint32_t&     destBufferLen,
-                                        uint32_t*           bytesDecrypted,
-                                        bool                doFullDecryptWithoutFinal = false);
+        SgxCryptStatus decryptUpdateEvp(const uint32_t& keyId,
+                                        const uint8_t*  sourceBuffer,
+                                        const uint32_t& sourceBufferLen,
+                                        uint8_t*        destBuffer,
+                                        const uint32_t& destBufferLen,
+                                        uint32_t*       bytesDecrypted,
+                                        bool            doFullDecryptWithoutFinal = false);
 
         /**
         * Continues an IPP decryption operation
@@ -438,14 +442,14 @@ namespace CryptoSgx
         * @param    doFullDecryptWithoutFinal  Boolean value, if true, the operation is also finalized by calling decryptFinal() in this function
         * @return   SgxCryptStatus             SGX_CRYPT_STATUS_SUCCESS when success or error code otherwise
         */
-        SgxCryptStatus decryptUpdateIpp(const uint32_t&     keyId,
-                                        const uint8_t*      sourceBuffer,
-                                        const uint32_t&     sourceBufferLen,
-                                        uint8_t*            destBuffer,
-                                        const uint32_t&     destBufferLen,
-                                        uint32_t*           destBufferWritten,
-                                        IppCtxState&        ippCtxState,
-                                        bool                doFullDecryptWithoutFinal = false);
+        SgxCryptStatus decryptUpdateIpp(const uint32_t& keyId,
+                                        const uint8_t*  sourceBuffer,
+                                        const uint32_t& sourceBufferLen,
+                                        uint8_t*        destBuffer,
+                                        const uint32_t& destBufferLen,
+                                        uint32_t*       destBufferWritten,
+                                        IppCtxState*    ippCtxState,
+                                        bool            doFullDecryptWithoutFinal = false);
 
         /**
          * Finalizes an IPP multi-part decryption process
@@ -458,7 +462,7 @@ namespace CryptoSgx
         SgxCryptStatus decryptFinalIpp(const uint32_t& keyId,
                                        uint8_t*        destBuffer,
                                        uint32_t*       bytesDecrypted,
-                                       IppCtxState&    ippCtxState);
+                                       IppCtxState*    ippCtxState);
 
         /**
          * Finalizes an EVP multi-part decryption process
@@ -479,37 +483,33 @@ namespace CryptoSgx
 
     private:
 
-        SymmetricCrypto(const SymmetricCrypto& other) = delete;
+        void fillCryptInitParams(CryptParams*           cryptParams,
+                                 const BlockCipherMode& cipherMode,
+                                 const ByteBuffer&      key,
+                                 const uint8_t*         iv,
+                                 const uint32_t&        ivSize,
+                                 const uint8_t*         aad,
+                                 const uint32_t&        aadSize,
+                                 const uint32_t&        tagBits,
+                                 const int&             counterBits,
+                                 const uint32_t&        padding);
 
-        SymmetricCrypto& operator=(const SymmetricCrypto& other) = delete;
-
-        void fillCryptInitParams(CryptParams&              cryptParams,
-                                 const BlockCipherMode&    cipherMode,
-                                 const ByteBuffer&         key,
-                                 const uint8_t*            iv,
-                                 const uint32_t&           ivSize,
-                                 const uint8_t*            aad,
-                                 uint32_t                  aadSize,
-                                 uint32_t                  tagBits,
-                                 int                       counterBits,
-                                 const uint32_t&           padding);
-
-        bool allocateSymmetricKey(SymmetricKey&            symKeyStruct,
+        bool allocateSymmetricKey(SymmetricKey*            symKeyStruct,
                                   const SymmetricKeySize&  keySize);
 
-        bool populateSymmetricKey(SymmetricKey& symKey);
+        bool populateSymmetricKey(SymmetricKey* symKey);
 
         bool exportRawKey(SymmetricKey&     symKey,
                           uint8_t*          destBuffer,
                           const uint32_t&   destBufferLen,
                           uint32_t*         destBufferWritten,
-                          SgxCryptStatus&   status);
+                          SgxCryptStatus*   status);
 
-        bool exportPlatformBoundKey(SymmetricKey&      symKey,
-                                    uint8_t*           destBuffer,
-                                    const uint32_t&    destBufferLen,
-                                    uint32_t*          destBufferWritten,
-                                    SgxCryptStatus&    status);
+        bool exportPlatformBoundKey(const SymmetricKey& symKey,
+                                    uint8_t*            destBuffer,
+                                    const uint32_t&     destBufferLen,
+                                    uint32_t*           destBufferWritten,
+                                    SgxCryptStatus*     status);
 
         SymmetricKeyCache   mSymmetricKeyCache;
         EVPCtxStateCache    mEVPCtxStateCache;

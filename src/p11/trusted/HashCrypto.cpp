@@ -114,13 +114,16 @@ namespace CryptoSgx
 
     //---------------------------------------------------------------------------------------------
     bool CryptoHash::getHashState(const uint32_t& hashId,
-                                  HashState&      hashState)
+                                  HashState*      hashState)
     {
-        const bool result = mHashStateCache.find(hashId);
-        if (result)
+        bool result = false;
+
+        if (hashState && mHashStateCache.find(hashId))
         {
-            hashState = mHashStateCache.get(hashId);
+            *hashState = mHashStateCache.get(hashId);
+            result = true;
         }
+
         return result;
     }
 
@@ -137,7 +140,7 @@ namespace CryptoSgx
 
         do
         {
-            result = getHashState(hashId, hashState);
+            result = getHashState(hashId, &hashState);
 
             if (result && sourceBuffer)
             {
@@ -191,7 +194,7 @@ namespace CryptoSgx
                 break;
             }
 
-            result = getHashState(hashId, hashState);
+            result = getHashState(hashId, &hashState);
 
             if (!result)
             {
@@ -279,7 +282,7 @@ namespace CryptoSgx
             }
 
             result = srcBuffer && destBuffer && srcBufferLen && (destSizeRequired == destBufferLen);
-            if (!result )
+            if (!result)
             {
                 break;
             }

@@ -51,6 +51,10 @@ namespace CryptoSgx
          */
         CryptoHash() = default;
 
+        CryptoHash(const CryptoHash& other) = delete;
+
+        CryptoHash& operator=(const CryptoHash& other) = delete;
+
         /**
          * Creates a hash state
          * @param hashId            The hash handle from provider
@@ -116,11 +120,7 @@ namespace CryptoSgx
 
     private:
         bool getHashState(const uint32_t& hashId,
-                          HashState&      hashState);
-
-        CryptoHash(const CryptoHash& other) = delete;
-
-        CryptoHash& operator=(const CryptoHash& other) = delete;
+                          HashState*      hashState);
 
         void addHashState(const uint32_t&   hashId,
                           const HashMode&   hashMode,

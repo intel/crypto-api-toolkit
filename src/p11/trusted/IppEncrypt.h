@@ -50,6 +50,10 @@ namespace CryptoSgx
          */
         IppEncrypt();
 
+        IppEncrypt(const IppEncrypt& other) = delete;
+
+        IppEncrypt& operator=(const IppEncrypt& other) = delete;
+
         /**
          * Initializes the encryption process.
          * @param cryptParams   A pointer to CryptParams structure containing necessary parameters.
@@ -66,9 +70,9 @@ namespace CryptoSgx
         * @param sourceBufferLen    The length of the input buffer.
         * @return                   True if encryption is successful, false otherwise.
         */
-        bool encryptUpdate(IppCtxState&     ippCtxState,
+        bool encryptUpdate(IppCtxState*     ippCtxState,
                            uint8_t*         destBuffer,
-                           int&             encryptedBytes,
+                           int*             encryptedBytes,
                            const uint8_t*   sourceBuffer,
                            const int        sourceBufferLen);
 
@@ -76,7 +80,7 @@ namespace CryptoSgx
          * Finalizes a multi-part encryption process.
          * @param ippCtxState       The ipp state.
          */
-        void encryptFinal(IppCtxState& ippCtxState);
+        void encryptFinal(IppCtxState* ippCtxState);
 
         /**
          * Gets the evp context handle.

@@ -48,3 +48,9 @@ SUBDIRS = src
 install-exec-local:
 	mkdir -p $(CATKTOKENPATH)/tokens
 	chmod -R 1777 $(CATKTOKENPATH)/tokens
+	mkdir -p $(prefix)/include
+	chmod -R 1777 $(prefix)/include
+	cp $(srcdir)/src/p11/include/p11Defines.h $(prefix)/include/
+
+uninstall-local:
+	test -z $(prefix)/include/p11Defines.h || rm -f $(prefix)/include/p11Defines.h

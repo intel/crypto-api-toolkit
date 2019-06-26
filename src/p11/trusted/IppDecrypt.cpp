@@ -80,9 +80,9 @@ namespace CryptoSgx
         return result;
     }
     //---------------------------------------------------------------------------------------------
-    bool IppDecrypt::decryptUpdate(IppCtxState&     ippCtxState,
+    bool IppDecrypt::decryptUpdate(IppCtxState*     ippCtxState,
                                    uint8_t*         destBuffer,
-                                   int&             decryptedBytes,
+                                   int*             decryptedBytes,
                                    const uint8_t*   sourceBuffer,
                                    const int        sourceBufferLen)
     {
@@ -91,31 +91,37 @@ namespace CryptoSgx
 
         do
         {
-            result = sourceBuffer &&
-                     destBuffer   &&
+            result = ippCtxState    &&
+                     sourceBuffer   &&
+                     destBuffer     &&
+                     decryptedBytes &&
                      sourceBufferLen;
+
             if (!result)
             {
-                decryptedBytes = 0;
+                if (decryptedBytes)
+                {
+                    *decryptedBytes = 0;
+                }
                 break;
             }
 
             ippStatus = ippsAESDecryptCTR(sourceBuffer,
                                           destBuffer,
                                           sourceBufferLen,
-                                          ippCtxState.ippCtx,
-                                          ippCtxState.cryptParams.iv.get(),
-                                          ippCtxState.cryptParams.counterBits);
+                                          ippCtxState->ippCtx,
+                                          ippCtxState->cryptParams.iv.get(),
+                                          ippCtxState->cryptParams.counterBits);
 
             result = (ippStsNoErr == ippStatus);
 
-            if (result) // Assuming all of sourceBuffer is decrypted with no error returned by the above ipp call..
+            if (result) // Assuming all of sourceBuffer is decrypted with no error returned by the above ipp call.
             {
-                decryptedBytes = sourceBufferLen;
+                *decryptedBytes = sourceBufferLen;
             }
             else
             {
-                decryptedBytes = 0;
+                *decryptedBytes = 0;
             }
         } while (false);
 
@@ -123,9 +129,12 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
-    void IppDecrypt::decryptFinal(IppCtxState& ippCtxState)
+    void IppDecrypt::decryptFinal(IppCtxState* ippCtxState)
     {
-        delete [] (Ipp8u*)ippCtxState.ippCtx;
+        if (ippCtxState)
+        {
+            delete [] (Ipp8u*)ippCtxState->ippCtx;
+        }
     }
 
 } //CryptoSgx

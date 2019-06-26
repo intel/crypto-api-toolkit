@@ -104,7 +104,7 @@ namespace CryptoSgx
             release();
         }
         mSize = size;
-        mBuffer = new Byte[mSize];
+        mBuffer = new (std::nothrow) Byte[mSize];
     }
 
     //---------------------------------------------------------------------------------------------

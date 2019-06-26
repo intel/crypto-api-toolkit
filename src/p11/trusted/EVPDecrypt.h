@@ -50,6 +50,10 @@ namespace CryptoSgx
          */
         EVPDecrypt();
 
+        EVPDecrypt(const EVPDecrypt& other) = delete;
+
+        EVPDecrypt& operator=(const EVPDecrypt& other) = delete;
+
         /**
          * Initializes the decryption process.
          * @param   cipherMode    The cipher mode to be used for decryption.
@@ -69,9 +73,9 @@ namespace CryptoSgx
          * @param   removeBlockCipherPadding  Flag to indicate cleanup of padded bytes.
          * @return                            True if the operation was successful, false otherwise.
          */
-        bool decrypt(CryptParams& cryptParams,
+        bool decrypt(CryptParams* cryptParams,
                      Byte*        destBuffer,
-                     int&         decryptedBytes,
+                     int*         decryptedBytes,
                      const Byte*  sourceBuffer,
                      const int    sourceBufferLen,
                      bool         removeBlockCipherPadding = false);
@@ -82,7 +86,7 @@ namespace CryptoSgx
          * @param decryptedBytes  On exit, the length in bytes of the decrypted  bytes.
          * @return                True if the operation was successful, false otherwise.
          */
-        bool final(Byte* destBuffer, int& decryptedBytes);
+        bool final(Byte* destBuffer, int* decryptedBytes);
 
         /**
         * Continues a multi-part decryption process.
@@ -93,9 +97,9 @@ namespace CryptoSgx
         * @param sourceBufferLen    The length of the input buffer.
         * @return                   True if decryption is successful, false otherwise.
         */
-        bool decryptUpdate(EVPCtxState&   evpCtxState,
+        bool decryptUpdate(EVPCtxState*   evpCtxState,
                            uint8_t*       destBuffer,
-                           int&           decryptedBytes,
+                           int*           decryptedBytes,
                            const uint8_t* sourceBuffer,
                            const int      sourceBufferLen);
 
@@ -106,9 +110,9 @@ namespace CryptoSgx
          * @param decryptedBytes    On exit, the length in bytes of the decrypted  bytes.
          * @return                  True if the operation was successful, false otherwise.
          */
-        bool decryptFinal(EVPCtxState& evpCtxState,
+        bool decryptFinal(EVPCtxState* evpCtxState,
                           uint8_t*     destBuffer,
-                          int&         bytesDecrypted);
+                          int*         bytesDecrypted);
 
         /**
          * Gets the evp context handle.
@@ -131,7 +135,7 @@ namespace CryptoSgx
 
         bool decryptWithPaddingCustomizations(CryptParams& cryptParams,
                                               Byte*        destBuffer,
-                                              int&         decryptedBytes,
+                                              int*         decryptedBytes,
                                               const Byte*  sourceBuffer,
                                               const int    sourceBufferLen);
     };

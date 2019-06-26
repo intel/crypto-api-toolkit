@@ -55,7 +55,7 @@ namespace CryptoSgx
         ippStatus = ippsAESGetSize(&ctxSize);
         if (ippStsNoErr == ippStatus)
         {
-            mContext = (IppsAESSpec*)( new Ipp8u [ctxSize] );
+            mContext = (IppsAESSpec*)( new (std::nothrow) Ipp8u [ctxSize]);
         }        
 
         return isValid();

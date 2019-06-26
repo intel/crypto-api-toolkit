@@ -29,7 +29,7 @@
 #
 #
 
-AC_INIT([cryptoapitoolkit], [1.3])
+AC_INIT([cryptoapitoolkit], [1.4])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE([foreign -Wall])
@@ -53,6 +53,11 @@ AC_ARG_WITH([toolkit-path],
             [TOKENPATH="${withval}"],
             [echo "--with-token-path option not set. Defaults to /opt/intel/cryptoapitoolkit"; TOKENPATH="/opt/intel/cryptoapitoolkit"])
 
+AC_ARG_WITH([dcap-path],
+            AC_HELP_STRING([--with-dcap-path], [Requires DCAP path for ECDSA attestation. If not passed, DCAP is not supported. ]),
+            [DCAP_PATH="${withval}"],
+            [echo "--with-dcap-path option not set. No support for DCAP (ECDSA based quote)"; DCAP_PATH="NO_PATH_SET_UNSUPPORTED"])
+
 AC_ARG_ENABLE([import-raw-symkey-support],
               AC_HELP_STRING([--enable-import-raw-symkey-support], [Enable importing raw symmetric key. Use with caution/only for test purposes.]),
               [IMPORT_RAW_SYMKEY_SUPPORT="${enableval}"],
@@ -65,6 +70,19 @@ AC_ARG_ENABLE([import-raw-symkey-support-for-hmac],
               AC_HELP_STRING([--enable-import-raw-symkey-support-for-hmac], [Enable importing raw symmetric key for HMAC. Use with caution/only for test purposes.]),
               [IMPORT_RAW_SYMKEY_FOR_HMAC_SUPPORT="${enableval}"],
               [echo "--import-raw-symkey-support-for-hmac option not set. Defaults to no support for importing raw symmetric key"; IMPORT_RAW_SYMKEY_FOR_HMAC_SUPPORT="no"])
+
+AS_IF([test "x$DCAP_PATH" != "xNO_PATH_SET_UNSUPPORTED"],
+      [
+      AC_DEFINE([DCAP_SUPPORT], [], [DCAP Support])
+      AC_SUBST(DCAP_INCLUDE_PATH, $DCAP_PATH)
+      AM_CONDITIONAL(WITH_DCAP, true)
+      echo "DCAP_INCLUDE_PATH set to $DCAP_INCLUDE_PATH"
+      ],
+      [
+      AM_CONDITIONAL(WITH_DCAP, false)
+      echo "Building without DCAP support"
+      ]
+      )
 
 AS_IF([test "x$IMPORT_RAW_SYMKEY_FOR_HMAC_SUPPORT" = "xyes"],
       [AC_DEFINE([IMPORT_KEY_FOR_HMAC], [], [Support for importing raw symmetric key for HMAC])])
@@ -89,7 +107,7 @@ else
 fi
 
 echo "TOKENPATH present in path $TOKENPATH"
-AC_DEFINE_UNQUOTED([CRYPTOTOOLKIT_TOKENPATH], "${TOKENPATH}", [Crypto API Toolkit token path] )
+AC_DEFINE_UNQUOTED([CRYPTOTOOLKIT_TOKENPATH], "${TOKENPATH}", [Crypto API Toolkit token path])
 
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_FILES([Makefile src/Makefile src/p11/Makefile src/p11/untrusted/Makefile src/p11/trusted/Makefile src/p11Sample/Makefile])

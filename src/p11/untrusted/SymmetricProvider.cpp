@@ -29,719 +29,385 @@
  *
  */
 
-#include <sgx_error.h>
-#include <vector>
-
 #include "SymmetricProvider.h"
-#include "EnclaveHelpers.h"
-#include "Constants.h"
-#include "p11Enclave_u.h"
 
 namespace P11Crypto
 {
-    std::recursive_mutex SymmetricProvider::mProviderMutex;
-
-    //---------------------------------------------------------------------------------------------
-    std::shared_ptr<SymmetricProvider> SymmetricProvider::getSymmetricProvider()
+    namespace SymmetricProvider
     {
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        std::shared_ptr<SymmetricProvider> symmetricProvider = std::make_shared<SymmetricProvider>();
-
-        ulock.unlock();
-        return symmetricProvider;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV SymmetricProvider::generateKey(const CK_SESSION_HANDLE& hSession,
-                                         const CK_ATTRIBUTE_PTR   pTemplate,
-                                         const CK_ULONG&          ulCount,
-                                         CK_OBJECT_HANDLE_PTR     phKey,
-                                         Attributes&              keyAttributes)
-    {
-        CK_RV                   rv            = CKR_FUNCTION_FAILED;
-        uint32_t                keyLength     = 0;
-        uint32_t                keyHandle     = 0;
-        bool                    importRawKey  = false;
-        bool                    generateKey   = false;
-        sgx_status_t            sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus          enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        std::string             label, id;
-        CK_KEY_TYPE             keyType;
-        CK_OBJECT_CLASS         keyClass;
-        std::vector<uint8_t>    rawKeyBuffer;
-        EnclaveHelpers          enclaveHelpers;
-        KeyGenerationMechanism  keyGenMechanism;
-        uint32_t                attributeBitmask;
-        AttributeHelpers        attributeHelpers;
-
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
+        //---------------------------------------------------------------------------------------------
+        CK_RV generateAesKey(const SymmetricKeyParams& symKeyParams,
+                             const bool&               importKey,
+                             CK_OBJECT_HANDLE_PTR      phKey)
         {
-            if (!pTemplate  ||
-                !phKey)
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            uint32_t       keyHandle     = 0;
+            P11Crypto::EnclaveHelpers enclaveHelpers;
+
+            if (!phKey)
             {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
+                return CKR_ARGUMENTS_BAD;
             }
 
-            rv = attributeHelpers.getSymmetricKeyParameters(pTemplate,
-                                                            ulCount,
-                                                            importRawKey,
-                                                            generateKey,
-                                                            rawKeyBuffer,
-                                                            keyLength);
-            if (CKR_OK != rv)
+            if (importKey)
             {
-                break;
-            }
-
-            if (importRawKey && generateKey)
-            {
-                rv = CKR_TEMPLATE_INCONSISTENT;
-                break;
-            }
-
-            if (importRawKey)
-            {
-                keyGenMechanism = KeyGenerationMechanism::aesImportRawKey;
-                rv = attributeHelpers.extractAttributesFromTemplate(keyGenMechanism,
-                                                                    pTemplate,
-                                                                    ulCount,
-                                                                    attributeBitmask,
-                                                                    label,
-                                                                    id,
-                                                                    keyClass,
-                                                                    keyType);
-                if (CKR_OK != rv)
-                {
-                    break;
-                }
-
-                attributeHelpers.populateAttributes(attributeBitmask,
-                                                    label,
-                                                    id,
-                                                    keyGenMechanism,
-                                                    keyClass,
-                                                    keyType,
-                                                    keyAttributes);
 #ifndef IMPORT_RAW_KEY
-                rv = CKR_GENERAL_ERROR;
-                break;
+                return CKR_IMPORT_RAW_KEY_UNSUPPORTED;
 #else
                 sgxStatus = importSymmetricKey(enclaveHelpers.getSgxEnclaveId(),
                                                reinterpret_cast<int32_t*>(&enclaveStatus),
                                                &keyHandle,
-                                               rawKeyBuffer.data(),
-                                               rawKeyBuffer.size());
+                                               symKeyParams.rawKeyBuffer.data(),
+                                               symKeyParams.rawKeyBuffer.size());
 #endif
             }
-            else if (generateKey)
+            else
             {
-                keyGenMechanism = KeyGenerationMechanism::aesGenerateKey;
-                rv = attributeHelpers.extractAttributesFromTemplate(keyGenMechanism,
-                                                                    pTemplate,
-                                                                    ulCount,
-                                                                    attributeBitmask,
-                                                                    label,
-                                                                    id,
-                                                                    keyClass,
-                                                                    keyType);
+                sgxStatus = generateSymmetricKey(enclaveHelpers.getSgxEnclaveId(),
+                                                 reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                 &keyHandle,
+                                                 symKeyParams.keyLength);
+            }
+
+
+            rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+            if (CKR_OK == rv)
+            {
+                *phKey = keyHandle;
+            }
+            else
+            {
+                *phKey = CK_INVALID_HANDLE;
+            }
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV encryptInit(const uint32_t& keyHandle, const AesCryptParams& aesCryptParams)
+        {
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            EnclaveHelpers enclaveHelpers;
+
+            do
+            {
+                sgxStatus = symmetricEncryptInit(enclaveHelpers.getSgxEnclaveId(),
+                                                 reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                 keyHandle,
+                                                 aesCryptParams.iv.data(),  aesCryptParams.iv.size(),
+                                                 aesCryptParams.aad.data(), aesCryptParams.aad.size(),
+                                                 static_cast<int>(aesCryptParams.cipherMode),
+                                                 aesCryptParams.padding,
+                                                 aesCryptParams.tagBits,
+                                                 aesCryptParams.counterBits);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+            } while (false);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV decryptInit(const uint32_t& keyHandle, const AesCryptParams& aesCryptParams)
+        {
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            EnclaveHelpers enclaveHelpers;
+
+            do
+            {
+                sgxStatus = symmetricDecryptInit(enclaveHelpers.getSgxEnclaveId(),
+                                                 reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                 keyHandle,
+                                                 aesCryptParams.iv.data(),  aesCryptParams.iv.size(),
+                                                 aesCryptParams.aad.data(), aesCryptParams.aad.size(),
+                                                 static_cast<int>(aesCryptParams.cipherMode),
+                                                 aesCryptParams.padding,
+                                                 aesCryptParams.tagBits,
+                                                 aesCryptParams.counterBits);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+            } while (false);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV encryptUpdate(const uint32_t& keyHandle,
+                            const uint8_t*  sourceBuffer,
+                            const uint32_t& sourceBufferLen,
+                            uint8_t*        encryptedData,
+                            const uint32_t& encryptedDataLen,
+                            uint32_t*       destBufferRequiredLen)
+        {
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            EnclaveHelpers enclaveHelpers;
+
+            do
+            {
+                if (!sourceBuffer)
+                {
+                    rv = CKR_ARGUMENTS_BAD;
+                    break;
+                }
+
+                sgxStatus = symmetricEncryptUpdate(enclaveHelpers.getSgxEnclaveId(),
+                                                   reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                   keyHandle,
+                                                   sourceBuffer,  sourceBufferLen,
+                                                   encryptedData, encryptedDataLen,
+                                                   destBufferRequiredLen);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+            } while (false);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV decryptUpdate(const uint32_t& keyHandle,
+                            const uint8_t*  encryptedData,
+                            const uint32_t& encryptedDataLen,
+                            uint8_t*        destBuffer,
+                            const uint32_t& destBufferLen,
+                            uint32_t*       destBufferRequiredLen)
+        {
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            P11Crypto::EnclaveHelpers enclaveHelpers;
+
+            do
+            {
+                if (!encryptedData)
+                {
+                    rv = CKR_ARGUMENTS_BAD;
+                    break;
+                }
+
+                sgxStatus = symmetricDecryptUpdate(enclaveHelpers.getSgxEnclaveId(),
+                                                   reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                   keyHandle,
+                                                   encryptedData, encryptedDataLen,
+                                                   destBuffer,    destBufferLen,
+                                                   destBufferRequiredLen);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+            } while (false);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV encryptFinal(const uint32_t& keyHandle,
+                           uint8_t*        encryptedData,
+                           uint32_t*       destBufferRequiredLen)
+        {
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            P11Crypto::EnclaveHelpers enclaveHelpers;
+
+            do
+            {
+                sgxStatus = symmetricEncryptFinal(enclaveHelpers.getSgxEnclaveId(),
+                                                reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                keyHandle,
+                                                encryptedData,
+                                                destBufferRequiredLen);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+            } while (false);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV decryptFinal(const uint32_t& keyHandle,
+                           uint8_t*        decryptedData,
+                           uint32_t*       destBufferRequiredLen)
+        {
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            EnclaveHelpers enclaveHelpers;
+
+            do
+            {
+                if (!destBufferRequiredLen)
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
+
+                sgxStatus = symmetricDecryptFinal(enclaveHelpers.getSgxEnclaveId(),
+                                                reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                keyHandle,
+                                                decryptedData,
+                                                destBufferRequiredLen);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+                if (CKR_OK != rv)
+                {
+                    *destBufferRequiredLen = 0;
+                }
+
+            } while (false);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV wrapKey(const uint32_t&       wrappingKeyHandle,
+                      const uint32_t&       keyHandleData,
+                      const AesCryptParams& aesCryptParams,
+                      uint8_t*              destBuffer,
+                      const uint32_t&       destBufferLen,
+                      uint32_t*             destBufferLenRequired)
+        {
+            CK_RV               rv              = CKR_FUNCTION_FAILED;
+            sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            EnclaveHelpers      enclaveHelpers;
+
+            do
+            {
+                sgxStatus = wrapSymmetricKeyWithSymmetricKey(enclaveHelpers.getSgxEnclaveId(),
+                                                             reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                             wrappingKeyHandle,
+                                                             keyHandleData,
+                                                             aesCryptParams.iv.data(),  aesCryptParams.iv.size(),
+                                                             aesCryptParams.aad.data(), aesCryptParams.aad.size(),
+                                                             static_cast<uint8_t>(aesCryptParams.cipherMode),
+                                                             static_cast<int>(aesCryptParams.padding),
+                                                             aesCryptParams.tagBits,
+                                                             aesCryptParams.counterBits,
+                                                             destBuffer, destBufferLen,
+                                                             destBufferLenRequired);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+            } while (false);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV platformbindKey(const uint32_t& keyHandle,
+                              uint8_t*        destBuffer,
+                              const uint32_t& destBufferLen,
+                              uint32_t*       destBufferLenRequired)
+        {
+            CK_RV               rv              = CKR_FUNCTION_FAILED;
+            sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            EnclaveHelpers      enclaveHelpers;
+
+            do
+            {
+                sgxStatus = platformBindSymmetricKey(enclaveHelpers.getSgxEnclaveId(),
+                                                     reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                     keyHandle,
+                                                     destBuffer, destBufferLen,
+                                                     destBufferLenRequired);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+            } while (false);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV unwrapKey(const uint32_t&       unwrappingKeyHandle,
+                        const uint8_t*        sourceBuffer,
+                        const uint32_t&       sourceBufferLen,
+                        const AesCryptParams& aesCryptParams,
+                        const KeyType&        wrappedKeyType,
+                        uint32_t*             keyHandle)
+        {
+            CK_RV          rv                 = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus          = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus      = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            uint32_t       unwrappedKeyHandle = 0;
+            EnclaveHelpers enclaveHelpers;
+
+            do
+            {
+                if (!keyHandle || !sourceBuffer)
+                {
+                    rv = CKR_ARGUMENTS_BAD;
+                    break;
+                }
+
+                sgxStatus = unwrapWithSymmetricKey(enclaveHelpers.getSgxEnclaveId(),
+                                                   reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                   unwrappingKeyHandle,
+                                                   &unwrappedKeyHandle,
+                                                   sourceBuffer, sourceBufferLen,
+                                                   aesCryptParams.iv.data(),  aesCryptParams.iv.size(),
+                                                   aesCryptParams.aad.data(), aesCryptParams.aad.size(),
+                                                   static_cast<uint8_t>(aesCryptParams.cipherMode),
+                                                   static_cast<int>(aesCryptParams.padding),
+                                                   aesCryptParams.tagBits,
+                                                   aesCryptParams.counterBits,
+                                                   static_cast<uint8_t>(wrappedKeyType));
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
                 if (CKR_OK != rv)
                 {
                     break;
                 }
 
-                attributeHelpers.populateAttributes(attributeBitmask,
-                                                    label,
-                                                    id,
-                                                    keyGenMechanism,
-                                                    keyClass,
-                                                    keyType,
-                                                    keyAttributes);
+                *keyHandle = unwrappedKeyHandle;
 
-                if (!(static_cast<uint16_t>(SymmetricKeySize::keyLength128) == keyLength ||
-                      static_cast<uint16_t>(SymmetricKeySize::keyLength192) == keyLength ||
-                      static_cast<uint16_t>(SymmetricKeySize::keyLength256) == keyLength))
+            } while (false);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV importPlatformBoundKey(const uint8_t*  sourceBuffer,
+                                     const uint32_t& sourceBufferLen,
+                                     uint32_t*       keyHandle)
+        {
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            EnclaveHelpers enclaveHelpers;
+
+            do
+            {
+                if (!keyHandle || !sourceBuffer)
                 {
-                    rv = CKR_ATTRIBUTE_VALUE_INVALID;
+                    rv = CKR_ARGUMENTS_BAD;
                     break;
                 }
 
-                sgxStatus = generateSymmetricKey(enclaveHelpers.getSgxEnclaveId(),
-                                                 reinterpret_cast<int32_t*>(&enclaveStatus),
-                                                 &keyHandle,
-                                                 keyLength);
-            }
-            else
-            {
-                rv = CKR_TEMPLATE_INCONSISTENT;
-                break;
-            }
+                sgxStatus = unwrapAndImportPlatformBoundSymmetricKey(enclaveHelpers.getSgxEnclaveId(),
+                                                                     reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                                     keyHandle,
+                                                                     sourceBuffer, sourceBufferLen);
 
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
 
-            if (CKR_OK != rv)
-            {
-                break;
-            }
+            } while (false);
 
-            *phKey = keyHandle;
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV SymmetricProvider::destroyKey(const uint32_t&                          keyHandle,
-                                        std::shared_ptr<SymmetricKeyHandleCache> keyHandleCache)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            // Clean up keyHandle in enclave cache
-            sgxStatus = destroySymmetricKey(enclaveHelpers.getSgxEnclaveId(),
-                                            reinterpret_cast<int32_t*>(&enclaveStatus),
-                                            keyHandle);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-            // Clean up keyhandle in provider cache
-            keyHandleCache->remove(keyHandle);
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV SymmetricProvider::encryptInit(const uint32_t&   keyHandle,
-                                         const uint8_t*    iv,
-                                         const uint32_t&   ivSize,
-                                         const uint8_t*    aad,
-                                         const uint32_t&   aadSize,
-                                         const uint8_t&    cipherMode,
-                                         const int&        padding,
-                                         const uint32_t&   tagBits,
-                                         const int&        counterBits)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            sgxStatus = symmetricEncryptInit(enclaveHelpers.getSgxEnclaveId(),
-                                             reinterpret_cast<int32_t*>(&enclaveStatus),
-                                             keyHandle,
-                                             iv,
-                                             ivSize,
-                                             aad,
-                                             aadSize,
-                                             cipherMode,
-                                             padding,
-                                             tagBits,
-                                             counterBits);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV SymmetricProvider::encryptUpdate(const uint32_t&   keyHandle,
-                                           const uint8_t*    sourceBuffer,
-                                           const uint32_t&   sourceBufferLen,
-                                           uint8_t*          encryptedData,
-                                           const uint32_t&   encryptedDataLen,
-                                           uint32_t&         destBufferRequiredLen)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            if (!sourceBuffer)
-            {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
-
-            sgxStatus = symmetricEncryptUpdate(enclaveHelpers.getSgxEnclaveId(),
-                                               reinterpret_cast<int32_t*>(&enclaveStatus),
-                                               keyHandle,
-                                               sourceBuffer,
-                                               sourceBufferLen,
-                                               encryptedData,
-                                               encryptedDataLen,
-                                               &destBufferRequiredLen);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV SymmetricProvider::encryptFinal(const uint32_t&   keyHandle,
-                                          uint8_t*          encryptedData,
-                                          uint32_t&         destBufferRequiredLen)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            sgxStatus = symmetricEncryptFinal(enclaveHelpers.getSgxEnclaveId(),
-                                              reinterpret_cast<int32_t*>(&enclaveStatus),
-                                              keyHandle,
-                                              encryptedData,
-                                              &destBufferRequiredLen);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV SymmetricProvider::decryptInit(const uint32_t&   keyHandle,
-                                         const uint8_t*    iv,
-                                         const uint32_t&   ivSize,
-                                         const uint8_t*    aad,
-                                         const uint32_t&   aadSize,
-                                         const uint8_t&    cipherMode,
-                                         const int&        padding,
-                                         const uint32_t&   tagBits,
-                                         const int&        counterBits)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            sgxStatus = symmetricDecryptInit(enclaveHelpers.getSgxEnclaveId(),
-                                             reinterpret_cast<int32_t*>(&enclaveStatus),
-                                             keyHandle,
-                                             iv,
-                                             ivSize,
-                                             aad,
-                                             aadSize,
-                                             cipherMode,
-                                             padding,
-                                             tagBits,
-                                             counterBits);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV SymmetricProvider::decryptUpdate(const uint32_t&   keyHandle,
-                                           const uint8_t*    encryptedData,
-                                           const uint32_t&   encryptedDataLen,
-                                           uint8_t*          destBuffer,
-                                           const uint32_t&   destBufferLen,
-                                           uint32_t&         destBufferRequiredLen)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            if (!encryptedData)
-            {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
-
-            sgxStatus = symmetricDecryptUpdate(enclaveHelpers.getSgxEnclaveId(),
-                                               reinterpret_cast<int32_t*>(&enclaveStatus),
-                                               keyHandle,
-                                               encryptedData,
-                                               encryptedDataLen,
-                                               destBuffer,
-                                               destBufferLen,
-                                               &destBufferRequiredLen);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV SymmetricProvider::decryptFinal(const uint32_t&   keyHandle,
-                                          uint8_t*          decryptedData,
-                                          uint32_t&         destBufferRequiredLen)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            sgxStatus = symmetricDecryptFinal(enclaveHelpers.getSgxEnclaveId(),
-                                              reinterpret_cast<int32_t*>(&enclaveStatus),
-                                              keyHandle,
-                                              decryptedData,
-                                              &destBufferRequiredLen);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-            if (CKR_OK != rv)
-            {
-                destBufferRequiredLen = 0;
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV SymmetricProvider::wrapKey(const uint32_t&    wrappingKeyHandle,
-                                     const uint32_t&    keyHandleData,
-                                     const uint8_t*     iv,
-                                     const uint32_t&    ivSize,
-                                     const uint8_t*     aad,
-                                     const uint32_t&    aadSize,
-                                     const uint8_t&     cipherMode,
-                                     const int&         padding,
-                                     const uint32_t&    tagBits,
-                                     const int&         counterBits,
-                                     uint8_t*           destBuffer,
-                                     const uint32_t&    destBufferLen,
-                                     uint32_t&          destBufferLenRequired)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            sgxStatus = wrapSymmetricKeyWithSymmetricKey(enclaveHelpers.getSgxEnclaveId(),
-                                                         reinterpret_cast<int32_t*>(&enclaveStatus),
-                                                         wrappingKeyHandle,
-                                                         keyHandleData,
-                                                         iv,
-                                                         ivSize,
-                                                         aad,
-                                                         aadSize,
-                                                         cipherMode,
-                                                         padding,
-                                                         tagBits,
-                                                         counterBits,
-                                                         destBuffer,
-                                                         destBufferLen,
-                                                         &destBufferLenRequired);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV SymmetricProvider::platformbindKey(const uint32_t&    keyHandle,
-                                             uint8_t*           destBuffer,
-                                             const uint32_t&    destBufferLen,
-                                             uint32_t&          destBufferLenRequired)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            sgxStatus = platformBindSymmetricKey(enclaveHelpers.getSgxEnclaveId(),
-                                                 reinterpret_cast<int32_t*>(&enclaveStatus),
-                                                 keyHandle,
-                                                 destBuffer,
-                                                 destBufferLen,
-                                                 &destBufferLenRequired);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV SymmetricProvider::unwrapKey(const uint32_t&  unwrappingKeyHandle,
-                                       uint32_t*        keyHandle,
-                                       const uint8_t*   sourceBuffer,
-                                       const uint32_t&  sourceBufferLen,
-                                       const uint8_t*   iv,
-                                       const uint32_t&  ivSize,
-                                       const uint8_t*   aad,
-                                       const uint32_t&  aadSize,
-                                       const uint8_t&   cipherMode,
-                                       const int&       padding,
-                                       const uint32_t&  tagBits,
-                                       const int&       counterBits)
-    {
-        CK_RV               rv                 = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus          = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus      = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        uint32_t            unwrappedKeyHandle = 0;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            if (!keyHandle ||
-                !sourceBuffer)
-            {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
-            sgxStatus = unwrapSymmetricKeyWithSymmetricKey(enclaveHelpers.getSgxEnclaveId(),
-                                                           reinterpret_cast<int32_t*>(&enclaveStatus),
-                                                           unwrappingKeyHandle,
-                                                           &unwrappedKeyHandle,
-                                                           sourceBuffer,
-                                                           sourceBufferLen,
-                                                           iv,
-                                                           ivSize,
-                                                           aad,
-                                                           aadSize,
-                                                           static_cast<uint8_t>(cipherMode),
-                                                           padding,
-                                                           tagBits,
-                                                           counterBits);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-            *keyHandle = unwrappedKeyHandle;
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV SymmetricProvider::importPlatformBoundKey(uint32_t*       keyHandle,
-                                                    const uint8_t*  sourceBuffer,
-                                                    const uint32_t& sourceBufferLen)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            if (!keyHandle ||
-                !sourceBuffer)
-            {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
-
-            sgxStatus = unwrapAndImportPlatformBoundSymmetricKey(enclaveHelpers.getSgxEnclaveId(),
-                                                                 reinterpret_cast<int32_t*>(&enclaveStatus),
-                                                                 keyHandle,
-                                                                 sourceBuffer,
-                                                                 sourceBufferLen);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
+            return rv;
+        }
     }
 }

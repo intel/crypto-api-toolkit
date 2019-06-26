@@ -49,68 +49,38 @@ const int saltSizeBytes = 32;
 const int hashAlgorithmIdSha256 = 672;
 
 // Current session operation modes
-enum SessionOperation
+enum SessionOpState
 {
-    // Hash operations...
-    SESSION_HASH_OP_NONE = 0,
-    SESSION_HASH_OP_INIT,
-    SESSION_HASH_OP_DIGEST,
+    // Hash operations
+    SESSION_HASH_OP_INIT                = 1,
+    SESSION_HASH_OP_DIGEST              = 2,
 
-    // Encryption/Decryption operations..
-    SESSION_OP_ENCRYPT_NONE,
-    SESSION_OP_DECRYPT_NONE,
-    SESSION_OP_SYMMETRIC_ENCRYPT_INIT,
-    SESSION_OP_SYMMETRIC_ENCRYPT,
-    SESSION_OP_SYMMETRIC_DECRYPT_INIT,
-    SESSION_OP_SYMMETRIC_DECRYPT,
-    SESSION_OP_ASYMMETRIC_ENCRYPT_INIT,
-    SESSION_OP_ASYMMETRIC_ENCRYPT,
-    SESSION_OP_ASYMMETRIC_DECRYPT_INIT,
-    SESSION_OP_ASYMMETRIC_DECRYPT,
+    // Symmetric Encrypt
+    SESSION_OP_SYMMETRIC_ENCRYPT_INIT   = 3,
+    SESSION_OP_SYMMETRIC_ENCRYPT        = 4,
 
-    // Sign/Verify operations..
-    SESSION_OP_SIGN_NONE,
-    SESSION_OP_VERIFY_NONE,
-    SESSION_OP_SIGN_INIT,
-    SESSION_OP_VERIFY_INIT,
+    // Symmetric Decrypt
+    SESSION_OP_SYMMETRIC_DECRYPT_INIT   = 5,
+    SESSION_OP_SYMMETRIC_DECRYPT        = 6,
 
-    // FindObjects operations..
-    SESSION_OP_FIND_OBJECTS_NONE,
-    SESSION_OP_FIND_OBJECTS_INIT,
+    // Asymmetric Encrypt
+    SESSION_OP_ASYMMETRIC_ENCRYPT_INIT  = 9,
+    SESSION_OP_ASYMMETRIC_ENCRYPT       = 10,
+
+    // Asymmetric Decrypt
+    SESSION_OP_ASYMMETRIC_DECRYPT_INIT  = 11,
+    SESSION_OP_ASYMMETRIC_DECRYPT       = 12,
+
+    // Sign/Verify operations
+    SESSION_OP_SIGN_INIT                = 15,
+    SESSION_OP_VERIFY_INIT              = 16,
+
+    // FindObjects operations
+    SESSION_OP_FIND_OBJECTS_INIT        = 17,
+    SESSION_OP_FIND_OBJECTS             = 18,
+
+    SESSION_OP_MAX                      = 19
 };
-
-// Key attributes : Grows in power of 2.
-enum KeyAttribute
-{
-    ENCRYPT      = 0x00000001, // 1
-    DECRYPT      = 0x00000002, // 2
-    WRAP         = 0x00000004, // 4
-    UNWRAP       = 0x00000008, // 8
-    SIGN         = 0x00000010, // 16
-    VERIFY       = 0x00000020, // 32
-    TOKEN        = 0x00000040, // 64
-    PRIVATE      = 0x00000080, // 128
-    LOCAL        = 0x00000100, // 256
-    MODIFIABLE   = 0x00000200, // 512
-    DERIVE       = 0x00000400, // 1024
-    COPYABLE     = 0x00000800  // 2048
-};
-
-enum QuoteSignatureType
-{
-    UNLINKABLE_SIGNATURE = 1,
-    LINKABLE_SIGNATURE   = 2
-};
-
-// Custom error codes..
-#define CKR_DEVICE_TABLE_FULL            0x80000001UL
-#define CKR_CIPHER_OPERATION_FAILED      0x80000002UL
-#define CKR_PLATFORM_SEAL_UNSEAL_FAILED  0x80000003UL
-#define CKR_POWER_STATE_INVALID          0x80000004UL
-#define CKR_LOGGED_IN                    0x80000005UL
-#define CKR_NOT_LOGGED                   0x80000006UL
-#define CKR_USER_PIN_ALREADY_INITIALIZED 0x80000007UL
-#define CKR_OPERATION_NOT_PERMITTED      0x80000008UL
 
 typedef unsigned char Byte;
 

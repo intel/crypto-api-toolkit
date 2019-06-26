@@ -29,72 +29,41 @@
  *
  */
 
-#include <string>
-#include <dirent.h>
-#include <string.h>
 #include "Slot.h"
-#include "CryptoEnclaveDefs.h"
 
 namespace P11Crypto
 {
     //---------------------------------------------------------------------------------------------
     bool checkSlotValidity(const CK_SLOT_ID& slotID)
     {
-        bool     result      = false;
-        CK_ULONG numOfSlots  = 0;
-        do
-        {
-            DIR* dir = opendir(tokenPath.c_str());
+        CK_ULONG numSlots = 0;
 
-            if (dir == NULL_PTR)
-            {
-                break;
-            }
-
-            // Enumerate the directory
-            struct dirent* entry = NULL_PTR;
-
-            while (entry = readdir(dir))
-            {
-                if (!strcmp(entry->d_name, ".") ||
-                    !strcmp(entry->d_name, ".."))
-                {
-                    continue;
-                }
-                numOfSlots++;
-            }
-
-            int retValue = closedir(dir);
-
-            if (slotID <= numOfSlots)
-            {
-                result = true;
-            }
-
-        } while(false);
-
-        return result;
+        return (numSlots = Utils::SlotUtils::getNumSlots(tokenPath.c_str())) && (slotID <= numSlots);
     }
 
     //---------------------------------------------------------------------------------------------
     Slot::Slot (const CK_SLOT_ID& slotID)
     {
-        this->slotID = slotID;
+        isValid = checkSlotValidity(slotID) && (token = new (std::nothrow) Token(slotID));
 
-        isValid = checkSlotValidity(slotID);
-
-        token = new Token(slotID);
-
-        if (!token)
+        if (isValid)
         {
-            isValid = false;
+            this->slotID = slotID;
+        }
+        else
+        {
+            this->slotID = maxSlotsSupported + 1;
         }
     }
 
     //---------------------------------------------------------------------------------------------
     Slot::~Slot()
     {
-        delete token;
+        if (token)
+        {
+            delete token;
+            token = nullptr;
+        }
     }
 
     //---------------------------------------------------------------------------------------------
@@ -106,40 +75,34 @@ namespace P11Crypto
     //---------------------------------------------------------------------------------------------
     CK_RV Slot::getSlotInfo(CK_SLOT_INFO_PTR info)
     {
-        CK_RV rv = CKR_FUNCTION_FAILED;
-
-        do
+        if (!info)
         {
-            if (!info)
-            {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
+            return CKR_ARGUMENTS_BAD;
+        }
 
-            if (!valid())
-            {
-                rv = CKR_SLOT_ID_INVALID;
-                break;
-            }
+        if (!valid())
+        {
+            return CKR_SLOT_ID_INVALID;
+        }
 
-            const std::string slotDescription = "Crypto API Toolkit Slot ID " + std::to_string(slotID);
-            memset(info->slotDescription, ' ', 64);
-            memcpy(info->slotDescription, slotDescription.data(), slotDescription.size());
+        std::string slotDescription = "Crypto API Toolkit Slot ID: " + std::to_string(slotID);
+        slotDescription.resize(64, ' ');
 
-            memset(info->manufacturerID, ' ', 32);
-            memcpy(info->manufacturerID, "Crypto API Toolkit", 18);
+        memset(info->slotDescription, ' ', 64);
+        memcpy(info->slotDescription, slotDescription.data(), 64);
 
-            info->flags = CKF_TOKEN_PRESENT;
+        memset(info->manufacturerID, ' ', 32);
+        memcpy(info->manufacturerID, "Crypto API Toolkit", sizeof("Crypto API Toolkit") - 1);
 
-            info->hardwareVersion.major = 0;
-            info->hardwareVersion.minor = 0;
-            info->firmwareVersion.major = 0;
-            info->firmwareVersion.minor = 0;
+        info->flags = CKF_TOKEN_PRESENT;
 
-            rv = CKR_OK;
-        } while(false);
+        // (ToDo) Make these configurable via configure.ac
+        info->hardwareVersion.major = hardwareVersionMajor;
+        info->hardwareVersion.minor = hardwareVersionMinor;
+        info->firmwareVersion.major = firmwareVersionMajor;
+        info->firmwareVersion.minor = firmwareVersionMinor;
 
-        return rv;
+        return CKR_OK;
     }
 
     //---------------------------------------------------------------------------------------------
@@ -151,6 +114,11 @@ namespace P11Crypto
     //---------------------------------------------------------------------------------------------
     CK_RV Slot::initToken(CK_UTF8CHAR_PTR pin, const CK_ULONG& pinLength, CK_UTF8CHAR_PTR label)
     {
-        return token->initToken(pin, pinLength, label);
+        if (token)
+        {
+            return token->initToken(pin, pinLength, label);
+        }
+
+        return CKR_TOKEN_NOT_PRESENT;
     }
 }

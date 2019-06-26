@@ -84,42 +84,47 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
-    bool EVPDecrypt::decryptUpdate(EVPCtxState&       evpCtxState,
-                                   uint8_t*           destBuffer,
-                                   int&               decryptedLen,
-                                   const uint8_t*     sourceBuffer,
-                                   const int          sourceBufferLen)
+    bool EVPDecrypt::decryptUpdate(EVPCtxState*   evpCtxState,
+                                   uint8_t*       destBuffer,
+                                   int*           decryptedLen,
+                                   const uint8_t* sourceBuffer,
+                                   const int      sourceBufferLen)
     {
         bool        result              = false;
         uint32_t    maxDecryptedBytes   = 0;
         do
         {
-            if (BlockCipherMode::cbc             == evpCtxState.cryptParams.cipherMode &&
-                BlockCipherPadding::BlockPadding == static_cast<BlockCipherPadding>(evpCtxState.cryptParams.padding))
+            if (!evpCtxState || !decryptedLen)
+            {
+                return false;
+            }
+
+            if (BlockCipherMode::cbc             == evpCtxState->cryptParams.cipherMode &&
+                BlockCipherPadding::BlockPadding == static_cast<BlockCipherPadding>(evpCtxState->cryptParams.padding))
             {
                 maxDecryptedBytes = (sourceBufferLen / aesBlockSize) * aesBlockSize + aesBlockSize;
 
-                std::unique_ptr<uint8_t[]> tempDestBuffer(new uint8_t[maxDecryptedBytes], std::default_delete<uint8_t[]>());
+                std::unique_ptr<uint8_t[]> tempDestBuffer(new (std::nothrow) uint8_t[maxDecryptedBytes], std::default_delete<uint8_t[]>());
                 if (!tempDestBuffer.get())
                 {
                     break;
                 }
 
-                result = (EVP_DecryptUpdate(evpCtxState.evpCtx,
+                result = (EVP_DecryptUpdate(evpCtxState->evpCtx,
                                             tempDestBuffer.get(),
-                                            &decryptedLen,
+                                            decryptedLen,
                                             sourceBuffer,
                                             sourceBufferLen) == 1);
-                if (result && decryptedLen > 0)
+                if (result && *decryptedLen > 0)
                 {
-                    memcpy_s(destBuffer, decryptedLen, tempDestBuffer.get(), decryptedLen);
+                    memcpy_s(destBuffer, *decryptedLen, tempDestBuffer.get(), *decryptedLen);
                 }
             }
             else
             {
-                result = (EVP_DecryptUpdate(evpCtxState.evpCtx,
+                result = (EVP_DecryptUpdate(evpCtxState->evpCtx,
                                             destBuffer,
-                                            &decryptedLen,
+                                            decryptedLen,
                                             sourceBuffer,
                                             sourceBufferLen) == 1);
                 if (!result)
@@ -134,9 +139,9 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
-    bool EVPDecrypt::decryptFinal(EVPCtxState&    evpCtxState,
+    bool EVPDecrypt::decryptFinal(EVPCtxState*    evpCtxState,
                                   uint8_t*        destBuffer,
-                                  int&            decryptedLen)
+                                  int*            decryptedLen)
     {
         bool        result          = false;
         uint32_t    tagBytes        = 0;
@@ -144,13 +149,18 @@ namespace CryptoSgx
 
         do
         {
-            if (BlockCipherMode::gcm == evpCtxState.cryptParams.cipherMode)
+            if (!evpCtxState || !decryptedLen)
             {
-                tagBytes       = evpCtxState.cryptParams.tagBits >> 3;
-                cipherTextSize = evpCtxState.cryptParams.cipherText.size() - tagBytes;
-                ByteBuffer  tag(evpCtxState.cryptParams.cipherText.data() + cipherTextSize, tagBytes);
+                return false;
+            }
 
-                result = (1 == EVP_CIPHER_CTX_ctrl(evpCtxState.evpCtx,
+            if (BlockCipherMode::gcm == evpCtxState->cryptParams.cipherMode)
+            {
+                tagBytes       = evpCtxState->cryptParams.tagBits >> 3;
+                cipherTextSize = evpCtxState->cryptParams.cipherText.size() - tagBytes;
+                ByteBuffer  tag(evpCtxState->cryptParams.cipherText.data() + cipherTextSize, tagBytes);
+
+                result = (1 == EVP_CIPHER_CTX_ctrl(evpCtxState->evpCtx,
                                                    EVP_CTRL_GCM_SET_TAG,
                                                    tagBytes,
                                                    tag.get()));
@@ -161,30 +171,36 @@ namespace CryptoSgx
             }
 
             result = destBuffer &&
-                     (EVP_DecryptFinal_ex(evpCtxState.evpCtx,
+                     (EVP_DecryptFinal_ex(evpCtxState->evpCtx,
                                           destBuffer,
-                                          &decryptedLen) == 1);
+                                          decryptedLen) == 1);
         } while (false);
 
         return result;
     }
 
     //---------------------------------------------------------------------------------------------
-    bool EVPDecrypt::decrypt(CryptParams&   cryptParams,
+    bool EVPDecrypt::decrypt(CryptParams*   cryptParams,
                              Byte*          destBuffer,
-                             int&           decryptedBytes,
+                             int*           decryptedBytes,
                              const Byte*    sourceBuffer,
                              const int      sourceBufferLen,
                              bool           removeBlockCipherPadding)
     {
         bool result = true;
+
+        if (!cryptParams || !decryptedBytes)
+        {
+            return false;
+        }
+
         do
         {
             result = mContext.isValid() &&
                      destBuffer         &&
                      (EVP_DecryptUpdate(&mContext,
                                         destBuffer,
-                                        &decryptedBytes,
+                                        decryptedBytes,
                                         sourceBuffer,
                                         sourceBufferLen) == 1);
             if (!result)
@@ -194,7 +210,7 @@ namespace CryptoSgx
 
             if (removeBlockCipherPadding)
             {
-                result = decryptWithPaddingCustomizations(cryptParams,
+                result = decryptWithPaddingCustomizations(*cryptParams,
                                                           destBuffer,
                                                           decryptedBytes,
                                                           sourceBuffer,
@@ -206,13 +222,13 @@ namespace CryptoSgx
 
             }
 
-            if(BlockCipherMode::gcm == cryptParams.cipherMode  &&
-               cryptParams.tag.get())
+            if(BlockCipherMode::gcm == cryptParams->cipherMode  &&
+               cryptParams->tag.get())
             {
                 result = (1 == EVP_CIPHER_CTX_ctrl(&mContext,
                                                    EVP_CTRL_GCM_SET_TAG,
-                                                   cryptParams.tag.size(),
-                                                   cryptParams.tag.get()));
+                                                   cryptParams->tag.size(),
+                                                   cryptParams->tag.get()));
                 if (!result)
                 {
                     break;
@@ -223,12 +239,13 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
-    bool EVPDecrypt::final(Byte* destBuffer, int& decryptedBytes)
+    bool EVPDecrypt::final(Byte* destBuffer, int* decryptedBytes)
     {
-        return mContext.isValid() &&
+        return mContext.isValid()   &&
+               decryptedBytes       &&
                EVP_DecryptFinal_ex(&mContext,
                                    destBuffer,
-                                   &decryptedBytes) == 1;
+                                   decryptedBytes) == 1;
     }
 
     //---------------------------------------------------------------------------------------------
@@ -236,6 +253,12 @@ namespace CryptoSgx
                              const CryptParams& cryptParams)
     {
         bool result = false;
+
+        if (!cipher)
+        {
+            return false;
+        }
+
         do
         {
             result = EVP_DecryptInit_ex(&mContext,
@@ -299,6 +322,12 @@ namespace CryptoSgx
                              const CryptParams& cryptParams)
     {
         bool result = false;
+
+        if (!cipher)
+        {
+            return false;
+        }
+        
         do
         {
             result = EVP_DecryptInit_ex(&mContext,
@@ -320,17 +349,23 @@ namespace CryptoSgx
     //---------------------------------------------------------------------------------------------
     bool EVPDecrypt::decryptWithPaddingCustomizations(CryptParams&  cryptParams,
                                                       Byte*         destBuffer,
-                                                      int&          decryptedBytes,
+                                                      int*          decryptedBytes,
                                                       const Byte*   sourceBuffer,
                                                       const int     sourceBufferLen)
     {
         bool result = true;
+
+        if (!destBuffer || !decryptedBytes)
+        {
+            return false;
+        }
+
         do
         {
             // Verify each of the decrypted padding bytes. The last byte
             // in the decrypted plaintext buffer is a padding byte and
             // its value is the number of padding bytes.
-            uint8_t paddedBytes = destBuffer[decryptedBytes - 1];
+            uint8_t paddedBytes = destBuffer[*decryptedBytes - 1];
             if ((0 == paddedBytes) || (paddedBytes > aesBlockSize))
             {
                 // cannot be zero or greater than the cipher block size.
@@ -340,13 +375,13 @@ namespace CryptoSgx
 
             for (auto i = 1; i <= paddedBytes; ++i)
             {
-                if (destBuffer[(decryptedBytes - i)] != paddedBytes)
+                if (destBuffer[(*decryptedBytes - i)] != paddedBytes)
                 {
                     // Padding is not correct because a padding byte has the wrong value.
                     result = false;
                     break;
                 }
-                destBuffer[(decryptedBytes - i)] = 0;
+                destBuffer[(*decryptedBytes - i)] = 0;
             }
             // Reduce the decrypted plaintext size by the number of padding bytes.
             decryptedBytes -= paddedBytes;

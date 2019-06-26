@@ -80,9 +80,9 @@ namespace CryptoSgx
         return result;
     }
     //---------------------------------------------------------------------------------------------
-    bool IppEncrypt::encryptUpdate(IppCtxState&    ippCtxState,
+    bool IppEncrypt::encryptUpdate(IppCtxState*    ippCtxState,
                                    uint8_t*        destBuffer,
-                                   int&            encryptedBytes,
+                                   int*            encryptedBytes,
                                    const uint8_t*  sourceBuffer,
                                    const int       sourceBufferLen)
     {
@@ -91,31 +91,37 @@ namespace CryptoSgx
 
         do
         {
-            result = sourceBuffer &&
-                     destBuffer   &&
+            result = ippCtxState    &&
+                     sourceBuffer   &&
+                     destBuffer     &&
+                     encryptedBytes &&
                      sourceBufferLen;
+
             if (!result)
             {
-                encryptedBytes = 0;
+                if (encryptedBytes)
+                {
+                    *encryptedBytes = 0;
+                }
                 break;
             }
 
             ippStatus = ippsAESEncryptCTR(sourceBuffer,
                                           destBuffer,
                                           sourceBufferLen,
-                                          ippCtxState.ippCtx,
-                                          ippCtxState.cryptParams.iv.get(),
-                                          ippCtxState.cryptParams.counterBits);
+                                          ippCtxState->ippCtx,
+                                          ippCtxState->cryptParams.iv.get(),
+                                          ippCtxState->cryptParams.counterBits);
 
             result = (ippStsNoErr == ippStatus);
 
-            if (result) // Assuming all of sourceBuffer is encrypted with no error returned by the above ipp call..
+            if (result) // Assuming all of sourceBuffer is encrypted with no error returned by the above ipp call.
             {
-                encryptedBytes = sourceBufferLen;
+                *encryptedBytes = sourceBufferLen;
             }
             else
             {
-                encryptedBytes = 0;
+                *encryptedBytes = 0;
             }
         } while (false);
 
@@ -123,9 +129,12 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
-    void IppEncrypt::encryptFinal(IppCtxState& ippCtxState)
+    void IppEncrypt::encryptFinal(IppCtxState* ippCtxState)
     {
-        delete [] (Ipp8u*)ippCtxState.ippCtx;
+        if (ippCtxState)
+        {
+            delete [] (Ipp8u*)ippCtxState->ippCtx;
+        }
     }
 
 } //CryptoSgx

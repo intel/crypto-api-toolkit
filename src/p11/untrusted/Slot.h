@@ -34,6 +34,12 @@
 
 #include "p11Defines.h"
 #include "Token.h"
+#include "SlotUtils.h"
+#include "CryptoEnclaveDefs.h"
+
+#include <string>
+#include <dirent.h>
+#include <string.h>
 
 namespace P11Crypto
 {
@@ -78,22 +84,21 @@ namespace P11Crypto
         */
         CK_RV getSlotInfo(CK_SLOT_INFO_PTR info);
 
-        /**
-        * Gets the current slot ID.
-        * @return CK_SLOT_ID     The current slot ID.
-        */
-        CK_SLOT_ID getSlotID();
-
     private:
 
         // Token in the slot
-        Token* token;
+        Token* token = nullptr;
 
         // The slotID
         CK_SLOT_ID slotID;
 
         // SlotID's validity
         bool isValid;
+
+        static const CK_BYTE hardwareVersionMajor = 1;
+        static const CK_BYTE hardwareVersionMinor = 3;
+        static const CK_BYTE firmwareVersionMajor = 2;
+        static const CK_BYTE firmwareVersionMinor = 4;
     };
 }
 

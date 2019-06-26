@@ -34,6 +34,12 @@
 
 #include <sgx_error.h>
 #include <sgx_eid.h>
+#include <sgx_urts.h>
+#include <sgx_error.h>
+#include <sgx_uae_service.h>
+#include <map>
+
+#include "p11Enclave_u.h"
 #include "CryptoEnclaveDefs.h"
 #include "p11Defines.h"
 
@@ -53,11 +59,7 @@ namespace P11Crypto
         */
         inline bool isSgxEnclaveLoaded()
         {
-            bool isLoaded = false;
-
-            isLoaded = (mSgxEnclaveLoadedCount > 0) ? true : false;
-
-            return isLoaded;
+            return (mSgxEnclaveLoadedCount > 0);
         }
 
         /*
@@ -80,17 +82,15 @@ namespace P11Crypto
 
         /*
         * Loads the enclave.
-        * @param  providerType   The provider type.
         * @return sgx_status_t   SGX_SUCCESS if enclave load is successful, error code otherwise.
         */
-        sgx_status_t loadSgxEnclave(ProviderType providerType);
+        sgx_status_t loadSgxEnclave();
 
         /*
         * Unloads the enclave.
-        * @param  providerType   The provider type.
         * @return sgx_status_t   SGX_SUCCESS if enclave unload is successful, error code otherwise.
         */
-        sgx_status_t unloadSgxEnclave(ProviderType providerType);
+        sgx_status_t unloadSgxEnclave();
 
         /*
         * Maps the enclave return code to PKCS status code.

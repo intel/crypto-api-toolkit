@@ -29,7 +29,12 @@
 #
 #
 
+if WITH_DCAP
+AM_CPPFLAGS = -I$(srcdir)/../p11/include -I$(SGXSDKDIR)/include -I$(DCAP_INCLUDE_PATH)
+else
 AM_CPPFLAGS = -I$(srcdir)/../p11/include -I$(SGXSDKDIR)/include
+endif
+
 AM_CXXFLAGS = -D_FORTIFY_SOURCE=2 -std=c++11 -fstack-protector -Wformat -Wformat-security -fpie
 EXTRA_DIST = $(srcdir)/../p11/include/*.h
 AM_LDFLAGS = -ldl -L../p11/untrusted/.libs -lp11sgx

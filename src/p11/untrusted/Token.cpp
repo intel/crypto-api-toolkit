@@ -29,653 +29,27 @@
  *
  */
 
-#include <sys/stat.h>
-#include <string.h>
-#include <sstream>
-#include <fstream>
-#include <string>
-#include <vector>
-
 #include "Token.h"
-#include "CryptoEnclaveDefs.h"
-#include "EnclaveHelpers.h"
-#include "p11Enclave_u.h"
-
-#include <iomanip>
+#include "FileUtils.h"
 
 namespace P11Crypto
 {
-    // Separator string to be placed in token file
-    std::string separator("**********");
-
-    std::string slotKeyword         = "Slot :";
-    std::string sessionCountKeyword = "No of Sessions :";
-    std::string soPinKeyword        = "SO PIN :";
-    std::string userPinKeyword      = "User PIN :";
-    std::string labelKeyword        = "label :";
-    std::string soLoginKeyword      = "SO LoggedIn :";
-    std::string userLoginKeyword    = "USER LoggedIn :";
-
-    //---------------------------------------------------------------------------------------------
-    bool isTokenFilePresent(const CK_SLOT_ID& slotID)
-    {
-        bool tokenFilePresent = false;
-        struct stat buffer;
-
-        std::string tokenFileName(tokenPath + "slot" + std::to_string(slotID) + ".token");
-        tokenFilePresent = (stat(tokenFileName.c_str(), &buffer) == 0);
-
-        return tokenFilePresent;
-    }
-
     //---------------------------------------------------------------------------------------------
     Token::Token(const CK_SLOT_ID& slotID)
     {
         this->slotID = slotID;
+        tokenFile    = tokenPath + "slot" + std::to_string(slotID) + ".token";
         isValid      = true;
+        tokenData.clear();
     }
 
     //---------------------------------------------------------------------------------------------
     Token::~Token()
     {
-    }
-
-    //---------------------------------------------------------------------------------------------
-    void populateStringFromVector(const std::vector<uint8_t>& source,
-                                  std::string&                destination)
-    {
-        destination.clear();
-        uint32_t length = source.size();
-        for (auto i = 0; i < length; i ++)
-        {
-            destination.push_back(source[i]);
-        }
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV sealString(std::string& input,
-                     std::string& sealedOutput,
-                     bool         pin = false)
-    {
-        CK_RV                rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t         sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus       enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
-        uint32_t             bytesNeeded     = 0;
-        EnclaveHelpers       enclaveHelpers;
-        std::vector<uint8_t> destBuffer;
-
-        do
-        {
-            if (!pin)
-            {
-                sgxStatus = sealData(enclaveHelpers.getSgxEnclaveId(),
-                                     reinterpret_cast<int32_t*>(&enclaveStatus),
-                                     reinterpret_cast<uint8_t*>(&input.at(0)),
-                                     input.size(),
-                                     nullptr,
-                                     destBuffer.size(),
-                                     &bytesNeeded);
-            }
-            else
-            {
-                sgxStatus = sealPin(enclaveHelpers.getSgxEnclaveId(),
-                                    reinterpret_cast<int32_t*>(&enclaveStatus),
-                                    reinterpret_cast<uint8_t*>(&input.at(0)),
-                                    input.size(),
-                                    nullptr,
-                                    destBuffer.size(),
-                                    &bytesNeeded);
-            }
-
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-            destBuffer.resize(bytesNeeded);
-
-            if (!pin)
-            {
-                sgxStatus = sealData(enclaveHelpers.getSgxEnclaveId(),
-                                     reinterpret_cast<int32_t*>(&enclaveStatus),
-                                     reinterpret_cast<uint8_t*>(&input.at(0)),
-                                     input.size(),
-                                     destBuffer.data(),
-                                     destBuffer.size(),
-                                     &bytesNeeded);
-            }
-            else
-            {
-                sgxStatus = sealPin(enclaveHelpers.getSgxEnclaveId(),
-                                    reinterpret_cast<int32_t*>(&enclaveStatus),
-                                    reinterpret_cast<uint8_t*>(&input.at(0)),
-                                    input.size(),
-                                    destBuffer.data(),
-                                    destBuffer.size(),
-                                    &bytesNeeded);
-            }
-
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-            populateStringFromVector(destBuffer, sealedOutput);
-
-        } while(false);
-
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    bool getDataFromTokenFile(const CK_SLOT_ID&  slotID,
-                              std::string&       sealedString,
-                              const std::string& keyword)
-    {
-        bool          result       = false;
-        bool          keywordFound = false;
-        bool          endOfFile    = false;
-        std::string   line;
-        std::string   tokenFileName(tokenPath + "slot" + std::to_string(slotID) + ".token");
-        std::ifstream fileHandle;
-
-        do
-        {
-            fileHandle.open(tokenFileName, std::ios::binary);
-            if (!fileHandle.good())
-            {
-                break;
-            }
-
-            while(!keywordFound)
-            {
-                getline(fileHandle, line);
-
-                if (line.find(keyword) != std::string::npos)
-                {
-                    keywordFound = true;
-
-                    getline(fileHandle, line);
-                    while(line.find(separator) == std::string::npos)
-                    {
-                        sealedString += line;
-
-                        getline(fileHandle, line);
-
-                        if (line.find(separator) == std::string::npos)
-                        {
-                            sealedString.append("\n");
-                        }
-                    }
-                }
-
-                if (fileHandle.eof())
-                {
-                    endOfFile = true;
-                    break;
-                }
-            }
-
-            if (!endOfFile)
-            {
-                result = true;
-            }
-
-        } while(false);
-
-        if (fileHandle.good())
-        {
-            fileHandle.close();
-        }
-
-        return result;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV getUpdatedSessionCount(std::string&   sessionCount,
-                                 std::string&   updatedSessionCount,
-                                 UpdateSession& flag)
-    {
-        CK_RV                rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t         sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus       enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
-        uint32_t             bytesNeeded     = 0;
-        EnclaveHelpers       enclaveHelpers;
-        std::vector<uint8_t> destBuffer;
-
-        do
-        {
-            sgxStatus = updateSessionCount(enclaveHelpers.getSgxEnclaveId(),
-                                           reinterpret_cast<int32_t*>(&enclaveStatus),
-                                           reinterpret_cast<uint8_t*>(&sessionCount.at(0)),
-                                           sessionCount.size(),
-                                           nullptr,
-                                           destBuffer.size(),
-                                           &bytesNeeded,
-                                           static_cast<uint8_t>(flag));
-
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-            destBuffer.resize(bytesNeeded);
-
-            sgxStatus = updateSessionCount(enclaveHelpers.getSgxEnclaveId(),
-                                           reinterpret_cast<int32_t*>(&enclaveStatus),
-                                           reinterpret_cast<uint8_t*>(&sessionCount.at(0)),
-                                           sessionCount.size(),
-                                           destBuffer.data(),
-                                           destBuffer.size(),
-                                           &bytesNeeded,
-                                           static_cast<uint8_t>(flag));
-
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-            populateStringFromVector(destBuffer, updatedSessionCount);
-
-        } while(false);
-
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV updateSealedString(const CK_SLOT_ID&  slotID,
-                             const std::string& sealedString,
-                             const std::string& keyword)
-    {
-        CK_RV           rv = CKR_GENERAL_ERROR;
-        std::string     tokenFileName(tokenPath + "slot" + std::to_string(slotID) + ".token");
-        std::string     tempTokenFileName = tokenFileName + "temp";
-        std::string     line;
-        std::ifstream   fileHandle;
-        std::ofstream   tempFileHandle;
-
-        do
-        {
-            fileHandle.open(tokenFileName, std::ifstream::binary);
-            tempFileHandle.open(tempTokenFileName, std::ofstream::out | std::ofstream::binary);
-
-            if (!fileHandle.good() ||
-                !tempFileHandle.good())
-            {
-                break;
-            }
-
-            while(getline(fileHandle, line))
-            {
-                if (line.find(keyword) != std::string::npos)
-                {
-                    tempFileHandle << keyword << std::endl;
-                    tempFileHandle << sealedString << std::endl;
-
-                    getline(fileHandle, line);
-                    while(line.find(separator) == std::string::npos)
-                    {
-                        getline(fileHandle, line);
-                    }
-
-                    tempFileHandle << separator << std::endl;
-                }
-                else
-                {
-                    tempFileHandle << line << std::endl;
-                    continue;
-                }
-            }
-
-            fileHandle.close();
-            tempFileHandle.close();
-
-            remove(tokenFileName.c_str());
-            rename(tempTokenFileName.c_str(), tokenFileName.c_str());
-
-            rv = CKR_OK;
-        } while(false);
-
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    bool isLoggedIn(const CK_SLOT_ID& slotID, const std::string& keyword)
-    {
-        CK_RV          rv              = 0x00000001UL;
-        bool           result          = false;
-        sgx_status_t   sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
-        EnclaveHelpers enclaveHelpers;
-        std::string    sealedPin;
-
-        do
-        {
-            result = getDataFromTokenFile(slotID, sealedPin, keyword);
-            if (!result)
-            {
-                break;
-            }
-
-            sgxStatus = checkLoginStatus(enclaveHelpers.getSgxEnclaveId(),
-                                         reinterpret_cast<int32_t*>(&enclaveStatus),
-                                         reinterpret_cast<uint8_t*>(&sealedPin.at(0)),
-                                         sealedPin.size());
-
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-        } while(false);
-
-        if (CKR_LOGGED_IN == rv)
-        {
-            result = true;
-        }
-        else
-        {
-            result = false;
-        }
-
-        return result;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    bool isSOUserLoggedIn(const CK_SLOT_ID& slotID)
-    {
-        return isLoggedIn(slotID, soLoginKeyword);
-    }
-
-    //---------------------------------------------------------------------------------------------
-    bool isUserLoggedIn(const CK_SLOT_ID& slotID)
-    {
-        return isLoggedIn(slotID, userLoginKeyword);
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV isPinValid(const CK_SLOT_ID& slotID, std::string oldPin, const std::string& keyword)
-    {
-        CK_RV          rv              = CKR_FUNCTION_FAILED;
-        bool           result          = false;
-        sgx_status_t   sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
-        EnclaveHelpers enclaveHelpers;
-        std::string    sealedPin;
-
-        do
-        {
-            result = getDataFromTokenFile(slotID, sealedPin, keyword);
-            if (!result)
-            {
-                rv = CKR_USER_PIN_NOT_INITIALIZED;
-                break;
-            }
-
-            sgxStatus = validatePin(enclaveHelpers.getSgxEnclaveId(),
-                                    reinterpret_cast<int32_t*>(&enclaveStatus),
-                                    reinterpret_cast<uint8_t*>(&oldPin.at(0)),
-                                    oldPin.size(),
-                                    reinterpret_cast<uint8_t*>(&sealedPin.at(0)),
-                                    sealedPin.size());
-
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-        } while(false);
-
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV setPin(const CK_SLOT_ID&  slotID,
-                 const std::string& keyword,
-                 CK_UTF8CHAR_PTR    oldPin,
-                 const CK_ULONG&    oldPinLen,
-                 CK_UTF8CHAR_PTR    newPin,
-                 const CK_ULONG&    newPinLen)
-    {
-        CK_RV       rv = CKR_FUNCTION_FAILED;
-        std::string sealedPin;
-
-        do
-        {
-            if (!oldPin || !newPin)
-            {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
-
-            std::string oldUserPin((const char*)oldPin, oldPinLen);
-            std::string newUserPin((const char*)newPin, newPinLen);
-
-            if (!getDataFromTokenFile(slotID, sealedPin, keyword))
-            {
-                rv = CKR_USER_PIN_NOT_INITIALIZED;
-                break;
-            }
-
-            rv = isPinValid(slotID, oldUserPin, keyword);
-            if (CKR_OK != rv)
-            {
-                rv = CKR_PIN_INCORRECT;
-                break;
-            }
-
-            rv = sealString(newUserPin, sealedPin, true);
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-            rv = updateSealedString(slotID, sealedPin, keyword);
-
-        } while(false);
-
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV sessionExists(const CK_SLOT_ID& slotID)
-    {
-        CK_RV          rv              = CKR_FUNCTION_FAILED;
-        bool           result          = false;
-        sgx_status_t   sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
-        EnclaveHelpers enclaveHelpers;
-        std::string    sealedSessionCount;
-
-        do
-        {
-            result = getDataFromTokenFile(slotID, sealedSessionCount, sessionCountKeyword);
-            if (!result)
-            {
-                break;
-            }
-
-            sgxStatus = checkSessionExistence(enclaveHelpers.getSgxEnclaveId(),
-                                              reinterpret_cast<int32_t*>(&enclaveStatus),
-                                              reinterpret_cast<uint8_t*>(&sealedSessionCount.at(0)),
-                                              sealedSessionCount.size());
-
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-        } while(false);
-
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV getUpdatedLoginStatus(std::string& loginStatus,
-                                std::string& updatedLoginStatus)
-    {
-        CK_RV                rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t         sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus       enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
-        uint32_t             bytesNeeded     = 0;
-        EnclaveHelpers       enclaveHelpers;
-        std::vector<uint8_t> destBuffer;
-
-        do
-        {
-            sgxStatus = updateLoginStatus(enclaveHelpers.getSgxEnclaveId(),
-                                          reinterpret_cast<int32_t*>(&enclaveStatus),
-                                          reinterpret_cast<uint8_t*>(&loginStatus.at(0)),
-                                          loginStatus.size(),
-                                          nullptr,
-                                          destBuffer.size(),
-                                          &bytesNeeded);
-
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-            destBuffer.resize(bytesNeeded);
-
-            sgxStatus = updateLoginStatus(enclaveHelpers.getSgxEnclaveId(),
-                                          reinterpret_cast<int32_t*>(&enclaveStatus),
-                                          reinterpret_cast<uint8_t*>(&loginStatus.at(0)),
-                                          loginStatus.size(),
-                                          destBuffer.data(),
-                                          destBuffer.size(),
-                                          &bytesNeeded);
-
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-            populateStringFromVector(destBuffer, updatedLoginStatus);
-
-        } while(false);
-
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV toggleLoginStatus(const CK_SLOT_ID& slotID, const std::string& keyword)
-    {
-        CK_RV       rv      = CKR_FUNCTION_FAILED;
-        bool        result  = false;
-        std::string loginStatus, newLoginStatus;
-
-        do
-        {
-            result = getDataFromTokenFile(slotID, loginStatus, keyword);
-            if (!result)
-            {
-                break;
-            }
-
-            rv = getUpdatedLoginStatus(loginStatus, newLoginStatus);
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-            rv = updateSealedString(slotID,
-                                    newLoginStatus,
-                                    keyword);
-        } while(false);
-
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    bool isUserPinInitialized(const CK_SLOT_ID& slotID)
-    {
-        std::string userPin;
-        return getDataFromTokenFile(slotID, userPin, userPinKeyword);
+        this->slotID = maxSlotsSupported + 1;
+        tokenFile    = "";
+        isValid      = false;
+        tokenData.clear();
     }
 
     //---------------------------------------------------------------------------------------------
@@ -685,203 +59,84 @@ namespace P11Crypto
     }
 
     //---------------------------------------------------------------------------------------------
-    CK_RV updateSessionCount(const CK_SLOT_ID& slotID, UpdateSession& flag)
+    void Token::loadTokenData()
     {
-        CK_RV           rv      = CKR_FUNCTION_FAILED;
-        bool            result  = false;
-        std::string     sessionCount, updatedSessionCount;
+        tokenData = Utils::TokenUtils::loadTokenData(tokenFile);
+        tokenDataLoaded = true;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    CK_RV Token::initToken(const CK_UTF8CHAR_PTR pin, const CK_ULONG& pinLength, const CK_UTF8CHAR_PTR label)
+    {
+        CK_RV rv               = CKR_FUNCTION_FAILED;
+        bool  tokenFilePresent = false;
 
         do
         {
-            result = getDataFromTokenFile(slotID, sessionCount, sessionCountKeyword);
-            if (!result)
+            if (!gSessionCache)
             {
+                rv = CKR_GENERAL_ERROR;
                 break;
             }
 
-            rv = getUpdatedSessionCount(sessionCount, updatedSessionCount, flag);
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-            rv = updateSealedString(slotID,
-                                    updatedSessionCount,
-                                    sessionCountKeyword);
-        } while(false);
-
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV Token::addSession()
-    {
-        UpdateSession sessionFlag = UpdateSession::OPEN;
-        return updateSessionCount(slotID, sessionFlag);
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV Token::removeSession()
-    {
-        UpdateSession sessionFlag = UpdateSession::CLOSE;
-        return updateSessionCount(slotID, sessionFlag);
-    }
-
-    //---------------------------------------------------------------------------------------------
-    bool populateTokenFile(std::ofstream&     fileHandle,
-                           const CK_SLOT_ID&  slotID,
-                           const std::string& sealedSoPin,
-                           const std::string& sealedLabel,
-                           const std::string& sealedSessionCount,
-                           const std::string& sealedLoginStatus)
-    {
-        bool result = false;
-
-        do
-        {
-            if (!fileHandle.good())
-            {
-                break;
-            }
-
-            fileHandle << separator << std::endl;
-
-            fileHandle << slotKeyword << std::endl;
-            fileHandle << slotID      << std::endl;
-
-            fileHandle << separator    << std::endl;
-            fileHandle << soPinKeyword << std::endl;
-            fileHandle.write(&sealedSoPin.at(0), sealedSoPin.size());
-            fileHandle << std::endl;
-
-            fileHandle << separator    << std::endl;
-            fileHandle << labelKeyword << std::endl;
-            fileHandle.write(&sealedLabel.at(0), sealedLabel.size());
-            fileHandle << std::endl;
-
-            fileHandle << separator           << std::endl;
-            fileHandle << sessionCountKeyword << std::endl;
-            fileHandle.write(&sealedSessionCount.at(0), sealedSessionCount.size());
-            fileHandle << std::endl;
-
-            fileHandle << separator       << std::endl;
-            fileHandle << soLoginKeyword  << std::endl;
-            fileHandle.write(&sealedLoginStatus.at(0), sealedLoginStatus.size());
-            fileHandle << std::endl;
-
-            fileHandle << separator        << std::endl;
-            fileHandle << userLoginKeyword << std::endl;
-            fileHandle.write(&sealedLoginStatus.at(0), sealedLoginStatus.size());
-            fileHandle << std::endl;
-
-            fileHandle << separator << std::endl;
-
-            result = true;
-        }while(false);
-
-        return result;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV Token::initToken(CK_UTF8CHAR_PTR pin, const CK_ULONG& pinLength, CK_UTF8CHAR_PTR label)
-    {
-        CK_RV           rv                 = CKR_FUNCTION_FAILED;
-        bool            result             = false;
-        std::string     loginStatus        = "FALSE";
-        std::string     sessionCountString = "0";
-        std::string     sealedUserPin      = "";
-        bool            userPinInitialized = false;
-        EnclaveHelpers  enclaveHelpers;
-        std::string     sealedSoPin, sealedSessionCount, sealedLoginStatus;
-
-        do
-        {
-            if (!pin   ||
-                !label ||
-                strnlen(reinterpret_cast<const char*>(label), 32) != 32)
+            if (!pin || !pinLength || !label ||
+                strnlen(reinterpret_cast<const char*>(label), labelSize) != labelSize)
             {
                 rv = CKR_ARGUMENTS_BAD;
                 break;
             }
 
-            std::string tokenFileName(tokenPath + "slot" + std::to_string(slotID) + ".token");
-            std::string soPin((const char*)pin, pinLength);
-            std::string labelString((const char*)label, 32);
-            bool        tokenFilePresent = isTokenFilePresent(slotID);
+            std::string soPin(reinterpret_cast<const char*>(pin), pinLength);
+            std::string labelString(reinterpret_cast<const char*>(label), labelSize);
 
             // If token file is present, check for validity of SO pin and session count.
-            if (tokenFilePresent)
+            if ((tokenFilePresent = Utils::FileUtils::isValid(tokenFile)))
             {
-                rv = isPinValid(slotID, soPin, soPinKeyword);
+                if (!tokenDataLoaded)
+                {
+                    loadTokenData();
+                }
+
+                rv = Utils::TokenUtils::validatePin(tokenData.soPin, soPin);
                 if (CKR_OK != rv)
                 {
                     rv = CKR_PIN_INCORRECT;
                     break;
                 }
 
-                rv = sessionExists(slotID);
-                if (CKR_SESSION_EXISTS == rv ||
-                    CKR_OK             != rv)
+                if (gSessionCache->sessionExists(slotID))
                 {
+                    rv = CKR_SESSION_EXISTS;
                     break;
                 }
-
-                userPinInitialized = getDataFromTokenFile(slotID, sealedUserPin, userPinKeyword);
             }
 
-            rv = sealString(soPin, sealedSoPin, true);
-            if (CKR_OK != rv)
+            std::string sealedSoPin, sealedLoginStatus;
+
+            bool sealPin = true;
+            sealedSoPin = Utils::EnclaveUtils::sealDataBlob(soPin, sealPin);
+            if (sealedSoPin.empty())
             {
+                rv = CKR_GENERAL_ERROR;
                 break;
             }
 
-            rv = sealString(sessionCountString, sealedSessionCount);
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-            rv = sealString(loginStatus, sealedLoginStatus);
-            if (CKR_OK != rv)
-            {
-                break;
-            }
+            // A userPin once initialized for a token in a slot, will stay persistent through multiple C_InitToken calls.
+            // In such cases, tokenData.userPin would already contain userPin by this point.
+            tokenData.slotId = slotID;
+            tokenData.label  = labelString;
+            tokenData.soPin  = sealedSoPin;
 
             if (tokenFilePresent)
             {
-                remove(tokenFileName.c_str());
+                Utils::FileUtils::deleteFile(tokenFile);
             }
 
-            std::ofstream fileHandle;
-            fileHandle.open(tokenFileName, std::ios::binary);
-
-            if (!fileHandle.good())
+            if (!Utils::TokenUtils::writeToken(tokenFile, tokenData))
             {
                 rv = CKR_GENERAL_ERROR;
                 break;
             }
-
-            result = populateTokenFile(fileHandle,
-                                       slotID,      // Slot ID can be saved without sealing, since it isn't a secret.
-                                       sealedSoPin,
-                                       labelString, // Label can be saved without sealing, since it isn't a secret.
-                                       sealedSessionCount,
-                                       sealedLoginStatus);
-            if (!result)
-            {
-                fileHandle.close();
-                rv = CKR_GENERAL_ERROR;
-                break;
-            }
-
-            if (userPinInitialized)
-            {
-                fileHandle << userPinKeyword << std::endl;
-                fileHandle.write(&sealedUserPin.at(0), sealedUserPin.size());
-                fileHandle << std::endl << separator << std::endl;
-            }
-
-            fileHandle.close();
 
             rv = CKR_OK;
 
@@ -893,342 +148,284 @@ namespace P11Crypto
     //---------------------------------------------------------------------------------------------
     CK_RV Token::getTokenInfo(CK_TOKEN_INFO_PTR tokenInfo)
     {
-        CK_RV rv = CKR_FUNCTION_FAILED;
-
-        do
+        if (!tokenInfo)
         {
-            if (!tokenInfo)
+            return CKR_ARGUMENTS_BAD;
+        }
+
+        tokenInfo->flags = 0;
+
+        memset(tokenInfo->label, ' ', 32);
+
+        if (Utils::FileUtils::isValid(tokenFile))
+        {
+            tokenInfo->flags |= CKF_TOKEN_INITIALIZED;
+
+            if (!tokenDataLoaded)
             {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
+                loadTokenData();
             }
 
-            tokenInfo->flags = 0;
-
-            std::string userPin;
-            std::string tokenLabel;
-
-            memset(tokenInfo->label, ' ', 32);
-
-            if (isTokenFilePresent(slotID))
+            if (!tokenData.userPin.empty())
             {
-                tokenInfo->flags |= CKF_TOKEN_INITIALIZED;
-
-                if (getDataFromTokenFile(slotID, userPin, userPinKeyword))
-                {
-                    tokenInfo->flags |= CKF_USER_PIN_INITIALIZED;
-                }
-
-                if (getDataFromTokenFile(slotID, tokenLabel, labelKeyword))
-                {
-                    size_t labelSize = tokenLabel.size();
-                    if (labelSize <= 32)    // Size limit Check: tokenInfo->label is 32 bytes.
-                    {
-                        memcpy(tokenInfo->label, tokenLabel.data(), labelSize);
-                    }
-                }
+                tokenInfo->flags |= CKF_USER_PIN_INITIALIZED;
             }
 
-            tokenInfo->flags |= CKF_DUAL_CRYPTO_OPERATIONS;
-            tokenInfo->flags |= CKF_LOGIN_REQUIRED;
+            if (tokenData.label.size() <= 32) // Size limit Check: tokenInfo->label is 32 bytes.
+            {
+                memcpy(tokenInfo->label, tokenData.label.data(), tokenData.label.size());
+            }
+        }
 
-            memset(tokenInfo->manufacturerID, ' ', 32);
-            memcpy(tokenInfo->manufacturerID, "Crypto API Toolkit", 18);
+        tokenInfo->flags |= CKF_DUAL_CRYPTO_OPERATIONS;
+        tokenInfo->flags |= CKF_LOGIN_REQUIRED;
 
-            memset(tokenInfo->model, ' ', 16);
+        memset(tokenInfo->manufacturerID, ' ', 32);
+        memcpy(tokenInfo->manufacturerID, "0x8086", sizeof("0x8086") - 1);
 
-            memset(tokenInfo->serialNumber, ' ', 16);
+        memset(tokenInfo->model, ' ', 16);
+        memcpy(tokenInfo->model, "Intel(R) SGX", sizeof("Intel(R) SGX") - 1);
 
-            tokenInfo->ulMaxSessionCount   = maxSessionCount;
-            tokenInfo->ulSessionCount      = CK_UNAVAILABLE_INFORMATION;
-            tokenInfo->ulMaxRwSessionCount = maxSessionCount;
-            tokenInfo->ulRwSessionCount    = CK_UNAVAILABLE_INFORMATION;
+        memset(tokenInfo->serialNumber, ' ', 16);
+        memcpy(tokenInfo->serialNumber, "Unavailable", sizeof("Unavailable") - 1);
 
-            tokenInfo->ulMaxPinLen = minPinLength;
-            tokenInfo->ulMinPinLen = maxPinLength;
+        tokenInfo->ulMaxSessionCount    = maxSessionsSupported;
+        tokenInfo->ulSessionCount       = CK_UNAVAILABLE_INFORMATION;
+        tokenInfo->ulMaxRwSessionCount  = maxRwSessionsSupported;
+        tokenInfo->ulRwSessionCount     = CK_UNAVAILABLE_INFORMATION;
 
-            tokenInfo->ulTotalPublicMemory  = CK_UNAVAILABLE_INFORMATION;
-            tokenInfo->ulFreePublicMemory   = CK_UNAVAILABLE_INFORMATION;
-            tokenInfo->ulTotalPrivateMemory = CK_UNAVAILABLE_INFORMATION;
-            tokenInfo->ulFreePrivateMemory  = CK_UNAVAILABLE_INFORMATION;
+        tokenInfo->ulMaxPinLen = maxPinLength;
+        tokenInfo->ulMinPinLen = minPinLength;
 
-            tokenInfo->hardwareVersion.major = 0;
-            tokenInfo->hardwareVersion.minor = 0;
-            tokenInfo->firmwareVersion.major = 0;
-            tokenInfo->firmwareVersion.minor = 0;
+        tokenInfo->ulTotalPublicMemory  = CK_UNAVAILABLE_INFORMATION;
+        tokenInfo->ulFreePublicMemory   = CK_UNAVAILABLE_INFORMATION;
+        tokenInfo->ulTotalPrivateMemory = CK_UNAVAILABLE_INFORMATION;
+        tokenInfo->ulFreePrivateMemory  = CK_UNAVAILABLE_INFORMATION;
 
-            rv = CKR_OK;
-        } while(false);
+        // Crypto API Toolkit release version is 1.4
+        // SGX SDK version is 2.5
+        tokenInfo->hardwareVersion.major = 1;
+        tokenInfo->hardwareVersion.minor = 4;
+        tokenInfo->firmwareVersion.major = 2;
+        tokenInfo->firmwareVersion.minor = 5;
 
-        return rv;
+        return CKR_OK;
     }
 
     //---------------------------------------------------------------------------------------------
-    CK_RV Token::loginSO(CK_UTF8CHAR_PTR pin, const CK_ULONG& pinLength)
+    CK_RV Token::login(const CK_UTF8CHAR_PTR pin, const CK_ULONG& pinLength, const CK_USER_TYPE& userType)
     {
-        CK_RV       rv     = CKR_FUNCTION_FAILED;
-        bool        result = false;
-        std::string sealedPin;
+        CK_RV rv        = CKR_FUNCTION_FAILED;
+        CK_RV loginRv   = CKR_FUNCTION_FAILED;
+        bool  soUserType = (CKU_SO == userType);
 
         do
         {
-            if (!pin)
+            if (!pin || !pinLength ||
+                ((CKU_SO != userType) && (CKU_USER != userType)))
             {
                 rv = CKR_ARGUMENTS_BAD;
                 break;
             }
 
-            if (isUserLoggedIn(slotID))
-            {
-                rv = CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
-                break;
-            }
-
-            if (isSOUserLoggedIn(slotID))
-            {
-                rv = CKR_USER_ALREADY_LOGGED_IN;
-                break;
-            }
-
-            result = getDataFromTokenFile(slotID, sealedPin, soPinKeyword);
-            if (!result)
-            {
-                rv = CKR_USER_PIN_NOT_INITIALIZED;
-                break;
-            }
-
-            std::string soPin((const char*)pin, pinLength);
-
-            rv = isPinValid(slotID, soPin, soPinKeyword);
-            if (CKR_OK != rv)
-            {
-                rv = CKR_PIN_INCORRECT;
-                break;
-            }
-
-            rv = toggleLoginStatus(slotID, soLoginKeyword);
-
-        } while(false);
-
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV Token::initUserPin(CK_UTF8CHAR_PTR pin, const CK_ULONG& pinLength)
-    {
-        CK_RV         rv = CKR_FUNCTION_FAILED;
-        std::string   tokenFileName(tokenPath + "slot" + std::to_string(slotID) + ".token");
-        std::string   sealedUserPin;
-        std::ofstream fileHandle;
-
-        do
-        {
-            if (!pin)
-            {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
-
-            if (isUserPinInitialized(slotID))
-            {
-                rv = CKR_USER_PIN_ALREADY_INITIALIZED;
-                break;
-            }
-
-            std::string userPin((const char*)pin, pinLength);
-
-            rv = sealString(userPin, sealedUserPin, true);
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-            fileHandle.open(tokenFileName, std::ios::binary | std::ios::app);
-
-            if (!fileHandle.good())
+            if (!gSessionCache)
             {
                 rv = CKR_GENERAL_ERROR;
                 break;
             }
 
-            fileHandle << userPinKeyword << std::endl;
-            fileHandle.write(&sealedUserPin.at(0), sealedUserPin.size());
-            fileHandle << std::endl << separator << std::endl;
+            // Lambda that returns CKR_USER_ALREADY_LOGGED_IN when same user is logged in and
+            // returns CKR_USER_ANOTHER_ALREADY_LOGGED_IN when a different user is logged in.
+            auto loginAllowed = [soUserType](const CK_SLOT_ID& slotID, CK_USER_TYPE type) -> CK_RV
+                                            {
+                                                if (gSessionCache->isLoggedIn(slotID, type))
+                                                {
+                                                    return CKR_USER_ALREADY_LOGGED_IN;
+                                                }
 
-            fileHandle.close();
+                                                // Switch the type from CKU_USER to CKU_SO or vice versa to check the login status.
+                                                type = soUserType ? CKU_USER : CKU_SO;
 
-            rv = CKR_OK;
-        } while(false);
+                                                if (gSessionCache->isLoggedIn(slotID, type))
+                                                {
+                                                    return CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
+                                                }
 
-        return rv;
-    }
+                                                return CKR_OK;
+                                            };
 
-    //---------------------------------------------------------------------------------------------
-    CK_RV Token::setSOPin(CK_UTF8CHAR_PTR  oldPin,
-                          const CK_ULONG&  oldPinLen,
-                          CK_UTF8CHAR_PTR  newPin,
-                          const CK_ULONG&  newPinLen)
-    {
-        return setPin(slotID,
-                      soPinKeyword,
-                      oldPin,
-                      oldPinLen,
-                      newPin,
-                      newPinLen);
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV Token::setUserPin(CK_UTF8CHAR_PTR oldPin,
-                            const CK_ULONG& oldPinLen,
-                            CK_UTF8CHAR_PTR newPin,
-                            const CK_ULONG& newPinLen)
-    {
-        return setPin(slotID,
-                      userPinKeyword,
-                      oldPin,
-                      oldPinLen,
-                      newPin,
-                      newPinLen);
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV Token::loginUser(CK_UTF8CHAR_PTR pin, const CK_ULONG& pinLength)
-    {
-        CK_RV       rv     = CKR_FUNCTION_FAILED;
-        bool        result = false;
-        std::string sealedPin;
-
-        do
-        {
-            if (!pin)
+            loginRv = rv = loginAllowed(slotID, userType);
+            if ((CKR_OK != rv) && (CKR_USER_ALREADY_LOGGED_IN != rv))
             {
-                rv = CKR_ARGUMENTS_BAD;
                 break;
             }
 
-            if (isUserLoggedIn(slotID))
+            if (!tokenDataLoaded)
             {
-                rv = CKR_USER_ALREADY_LOGGED_IN;
+                loadTokenData();
+            }
+
+            std::string sealedPin;
+
+            sealedPin = soUserType ? tokenData.soPin : tokenData.userPin;
+
+            if (sealedPin.empty())
+            {
+                rv = soUserType ? CKR_GENERAL_ERROR : CKR_USER_PIN_NOT_INITIALIZED;
                 break;
             }
 
-            if (isSOUserLoggedIn(slotID))
-            {
-                rv = CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
-                break;
-            }
+            std::string pinEntered(reinterpret_cast<const char*>(pin), pinLength);
 
-            result = getDataFromTokenFile(slotID, sealedPin, userPinKeyword);
-            if (!result)
-            {
-                rv = CKR_USER_PIN_NOT_INITIALIZED;
-                break;
-            }
+            rv = Utils::TokenUtils::validatePin(sealedPin, pinEntered);
 
-            std::string userPin((const char*)pin, pinLength);
+            pinEntered.clear();
 
-            rv = isPinValid(slotID, userPin, userPinKeyword);
             if (CKR_OK != rv)
             {
                 rv = CKR_PIN_INCORRECT;
                 break;
             }
 
-            rv = toggleLoginStatus(slotID, userLoginKeyword);
-
-            rv = CKR_OK;
-        } while(false);
+            if (loginRv != CKR_USER_ALREADY_LOGGED_IN)
+            {
+                if (!gSessionCache->login(slotID, userType))
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
+            }
+            else
+            {
+                gSessionCache->updateSessionStateForLogin(slotID, userType);
+            }
+            rv = loginRv;
+        } while (false);
 
         return rv;
     }
 
     //---------------------------------------------------------------------------------------------
-    CK_RV Token::logOut()
+    CK_RV Token::logout()
+    {
+        CK_RV rv = CKR_FUNCTION_FAILED;
+
+        if (!gSessionCache)
+        {
+            return rv;
+        }
+
+        if (!gSessionCache->isLoggedIn(slotID, CKU_SO) &&
+            !gSessionCache->isLoggedIn(slotID, CKU_USER))
+        {
+            rv = CKR_USER_NOT_LOGGED_IN;
+        }
+        else
+        {
+            rv = gSessionCache->logout(slotID) ? CKR_OK : CKR_GENERAL_ERROR;
+        }
+
+        return rv;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    CK_RV Token::initPin(CK_UTF8CHAR_PTR pin, const CK_ULONG& pinLength)
     {
         CK_RV rv = CKR_FUNCTION_FAILED;
 
         do
         {
-            if (isSOUserLoggedIn(slotID))
+            if (!pin || !pinLength)
             {
-                rv = toggleLoginStatus(slotID, soLoginKeyword);
-            }
-            else if (isUserLoggedIn(slotID))
-            {
-                rv = toggleLoginStatus(slotID, userLoginKeyword);
-            }
-            else
-            {
-                rv = CKR_USER_NOT_LOGGED_IN;
+                rv = CKR_ARGUMENTS_BAD;
                 break;
             }
+
+            if (!tokenDataLoaded)
+            {
+                loadTokenData();
+            }
+
+            if (!tokenData.userPin.empty())
+            {
+                rv = CKR_USER_PIN_ALREADY_INITIALIZED;
+                break;
+            }
+
+            std::string userPinEntered(reinterpret_cast<const char*>(pin), pinLength);
+
+            bool sealPin = true;
+            tokenData.userPin = Utils::EnclaveUtils::sealDataBlob(userPinEntered, sealPin);
+
+            if (tokenData.userPin.empty())
+            {
+                rv = CKR_GENERAL_ERROR;
+                break;
+            }
+
+            if (!Utils::TokenUtils::updateTokenFileDataField(tokenFile, Utils::TokenUtils::tagUserPIN, tokenData.userPin))
+            {
+                tokenData.userPin.clear();
+                rv = CKR_GENERAL_ERROR;
+                break;
+            }
+
+            rv = CKR_OK;
         } while(false);
 
         return rv;
     }
 
     //---------------------------------------------------------------------------------------------
-    /* This function sets the session count to 0.*/
-    CK_RV finalizeTokenFile(const CK_SLOT_ID& slotID)
+    CK_RV Token::setPin(CK_UTF8CHAR_PTR oldPin, const CK_ULONG& oldPinLen,
+                        CK_UTF8CHAR_PTR newPin, const CK_ULONG& newPinLen,
+                        const CK_USER_TYPE&     userType)
     {
-        CK_RV         rv           = CKR_FUNCTION_FAILED;
-        std::string   sessionCount = "0";
-        std::string   sealedSessionCount;
-        std::string   tokenFileName(tokenPath + "slot" + std::to_string(slotID) + ".token");
-        std::string   tempTokenFileName = tokenFileName + "temp";
-        std::string   line;
-        std::ifstream fileHandle;
-        std::ofstream tempFileHandle;
+        CK_RV       rv  = CKR_FUNCTION_FAILED;
+        uint32_t    tag = 0;
+        std::string sealedPin;
 
-        do
+        if (!oldPin || !newPin)
         {
-            rv = sealString(sessionCount, sealedSessionCount);
-            if (CKR_OK != rv)
-            {
+            return CKR_ARGUMENTS_BAD;
+        }
+
+        std::string oldUserPin(reinterpret_cast<const char*>(oldPin), oldPinLen);
+        std::string newUserPin(reinterpret_cast<const char*>(newPin), newPinLen);
+
+        if (!tokenDataLoaded)
+        {
+            loadTokenData();
+        }
+
+        switch (userType)
+        {
+            case CKU_SO:
+                tag = Utils::TokenUtils::tagSOPIN;
+                sealedPin = tokenData.soPin;
                 break;
-            }
-
-            fileHandle.open(tokenFileName, std::ifstream::binary);
-            tempFileHandle.open(tempTokenFileName, std::ofstream::out | std::ofstream::binary);
-
-            if (!fileHandle.good() ||
-                !tempFileHandle.good())
-            {
+            case CKU_USER:
+                if (tokenData.userPin.empty())
+                {
+                    return CKR_USER_PIN_NOT_INITIALIZED;
+                }
+                tag = Utils::TokenUtils::tagUserPIN;
+                sealedPin = tokenData.userPin;
                 break;
-            }
+            default:
+                break;
+        }
 
-            while(getline(fileHandle, line))
-            {
-                if (line.find(sessionCountKeyword) != std::string::npos) // Updating sessionCount.
-                {
-                    tempFileHandle << sessionCountKeyword << std::endl;
-                    tempFileHandle << sealedSessionCount << std::endl;
+        if (!tag)
+        {
+            return CKR_USER_TYPE_INVALID;
+        }
 
-                    getline(fileHandle, line);
-                    while(line.find(separator) == std::string::npos)
-                    {
-                        getline(fileHandle, line);
-                    }
-
-                    tempFileHandle << separator << std::endl;
-                }
-                else
-                {
-                    tempFileHandle << line << std::endl;
-                    continue;
-                }
-            }
-
-            fileHandle.close();
-            tempFileHandle.close();
-
-            remove(tokenFileName.c_str());
-            rename(tempTokenFileName.c_str(), tokenFileName.c_str());
-
-            rv = CKR_OK;
-
-        } while(false);
-
+        rv = Utils::TokenUtils::setPin(tokenFile,
+                                       tag,
+                                       oldUserPin,
+                                       newUserPin,
+                                       sealedPin);
         return rv;
     }
 
@@ -1237,23 +434,13 @@ namespace P11Crypto
     {
         CK_RV rv = CKR_FUNCTION_FAILED;
 
-        do
+        rv = logout();
+        if (CKR_OK                 != rv &&
+            CKR_USER_NOT_LOGGED_IN != rv)
         {
-            rv = logOut();
-            if (CKR_OK                 != rv &&
-                CKR_USER_NOT_LOGGED_IN != rv)
-            {
-                break;
-            }
+            return rv;
+        }
 
-            rv = finalizeTokenFile(slotID);
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-        } while(false);
-
-        return rv;
+        return CKR_OK;
     }
 }

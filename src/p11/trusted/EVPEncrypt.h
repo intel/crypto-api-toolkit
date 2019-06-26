@@ -50,6 +50,10 @@ namespace CryptoSgx
          */
         EVPEncrypt();
 
+        EVPEncrypt(const EVPEncrypt& other) = delete;
+
+        EVPEncrypt& operator=(const EVPEncrypt& other) = delete;
+
         /**
          * Initializes the encryption process.
          * @param cipherMode    The cipher mode to be used for encryption.
@@ -69,7 +73,7 @@ namespace CryptoSgx
          * @return                      True if the operation was successful, false otherwise.
          */
         bool encrypt(uint8_t*       destBuffer,
-                     int&           encryptedBytes,
+                     int*           encryptedBytes,
                      const uint8_t* sourceBuffer,
                      const int      sourceBufferLen,
                      bool           useBlockCipherPadding = false);
@@ -83,9 +87,9 @@ namespace CryptoSgx
         * @param sourceBufferLen    The length of the input buffer.
         * @return                   True if encryption is successful, false otherwise.
         */
-        bool encryptUpdate(EVPCtxState&     evpCtxState,
+        bool encryptUpdate(EVPCtxState*     evpCtxState,
                            uint8_t*         destBuffer,
-                           int&             encryptedBytes,
+                           int*             encryptedBytes,
                            const uint8_t*   sourceBuffer,
                            const int        sourceBufferLen);
 
@@ -96,9 +100,9 @@ namespace CryptoSgx
          * @param encryptedBytes    On exit, the length in bytes of the encrypted bytes.
          * @return                  True if the operation was successful, false otherwise.
          */
-        bool encryptFinal(EVPCtxState&  evpCtxState,
+        bool encryptFinal(EVPCtxState*  evpCtxState,
                           uint8_t*      destBuffer,
-                          int&          encryptedBytes);
+                          int*          encryptedBytes);
 
         /**
          * Finalizes the encryption process.
@@ -106,7 +110,7 @@ namespace CryptoSgx
          * @param encryptedBytes  On exit, the length in bytes of the encrypted bytes.
          * @return                True if the operation was successful, false otherwise.
          */
-        bool final(CryptParams& cryptParams, Byte* destBuffer, int& encryptedBytes);
+        bool final(CryptParams* cryptParams, Byte* destBuffer, int* encryptedBytes);
 
         /**
          * Gets the evp context handle.
@@ -130,7 +134,7 @@ namespace CryptoSgx
                      const CryptParams& cryptParams);
 
         bool encryptWithPaddingCustomizations(uint8_t*          destBuffer,
-                                              int&              encryptedBytes,
+                                              int*              encryptedBytes,
                                               const uint8_t*    sourceBuffer,
                                               const int         sourceBufferLen);
     };

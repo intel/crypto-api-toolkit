@@ -29,1010 +29,824 @@
  *
  */
 
+#include "AsymmetricProvider.h"
 #include <sgx_error.h>
 #include <sgx_uae_service.h>
-#include <vector>
-#include <functional>
 
-#include "AsymmetricProvider.h"
-#include "EnclaveHelpers.h"
-#include "p11Enclave_u.h"
+#ifdef DCAP_SUPPORT
+#include "sgx_pce.h"
+#include "sgx_dcap_ql_wrapper.h"
+#endif
 
 namespace P11Crypto
 {
-    std::recursive_mutex AsymmetricProvider::mProviderMutex;
-
-    //---------------------------------------------------------------------------------------------
-    std::shared_ptr<AsymmetricProvider> AsymmetricProvider::getAsymmetricProvider()
+    namespace AsymmetricProvider
     {
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        std::shared_ptr<AsymmetricProvider> asymmetricProvider = std::make_shared<AsymmetricProvider>();
-
-        ulock.unlock();
-        return asymmetricProvider;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV AsymmetricProvider::generateKeyPair(const CK_SESSION_HANDLE& hSession,
-                                              const CK_ATTRIBUTE_PTR   pPublicKeyTemplate,
-                                              const CK_ULONG&          ulPublicKeyAttributeCount,
-                                              const CK_ATTRIBUTE_PTR   pPrivateKeyTemplate,
-                                              const CK_ULONG&          ulPrivateKeyAttributeCount,
-                                              CK_OBJECT_HANDLE_PTR     phPublicKey,
-                                              CK_OBJECT_HANDLE_PTR     phPrivateKey,
-                                              Attributes&              publicKeyAttributes,
-                                              Attributes&              privateKeyAttributes)
-    {
-        CK_RV                  rv                         = CKR_FUNCTION_FAILED;
-        sgx_status_t           sgxStatus                  = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus         enclaveStatus              = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        bool                   hasModulusLength           = false;
-        uint32_t               modulusLength              = 0;
-        uint32_t               privateKeyAttributeBitmask = 0;
-        uint32_t               publicKeyAttributeBitmask  = 0;
-        uint32_t               publicKeyHandle            = 0;
-        uint32_t               privateKeyHandle           = 0;
-        KeyGenerationMechanism keyGenMechanism;
-        std::string            publicKeyLabel, privateKeyLabel, publicKeyId, privateKeyId;
-        CK_OBJECT_CLASS        publicKeyClass, privateKeyClass;
-        CK_KEY_TYPE            publicKeyType,  privateKeyType;
-        EnclaveHelpers         enclaveHelpers;
-        AttributeHelpers       attributeHelpers;
-
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
+        //---------------------------------------------------------------------------------------------
+        CK_RV generateRsaKeyPair(const AsymmetricKeyParams& asymKeyParams,
+                                 CK_OBJECT_HANDLE_PTR       phPublicKey,
+                                 CK_OBJECT_HANDLE_PTR       phPrivateKey)
         {
-            if (!pPublicKeyTemplate  ||
-                !pPrivateKeyTemplate ||
-                !phPublicKey         ||
-                !phPrivateKey)
+            CK_RV          rv               = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus        = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus    = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            uint32_t       publicKeyHandle  = 0;
+            uint32_t       privateKeyHandle = 0;
+            EnclaveHelpers enclaveHelpers;
+
+            do
             {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
+                if (!phPublicKey || !phPrivateKey)
+                {
+                    rv = CKR_ARGUMENTS_BAD;
+                    break;
+                }
 
-            keyGenMechanism = KeyGenerationMechanism::rsaGeneratePublicKey;
-            rv = attributeHelpers.extractAttributesFromTemplate(keyGenMechanism,
-                                                                pPublicKeyTemplate,
-                                                                ulPublicKeyAttributeCount,
-                                                                publicKeyAttributeBitmask,
-                                                                publicKeyLabel,
-                                                                publicKeyId,
-                                                                publicKeyClass,
-                                                                publicKeyType);
-            if (CKR_OK != rv)
-            {
-                break;
-            }
+                sgxStatus = generateAsymmetricKey(enclaveHelpers.getSgxEnclaveId(),
+                                                  reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                  &publicKeyHandle,
+                                                  &privateKeyHandle,
+                                                  static_cast<uint16_t>(asymKeyParams.modulusLength));
 
-            attributeHelpers.populateAttributes(publicKeyAttributeBitmask,
-                                                publicKeyLabel,
-                                                publicKeyId,
-                                                keyGenMechanism,
-                                                publicKeyClass,
-                                                publicKeyType,
-                                                publicKeyAttributes);
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
 
-            keyGenMechanism = KeyGenerationMechanism::rsaGeneratePrivateKey;
-            rv = attributeHelpers.extractAttributesFromTemplate(keyGenMechanism,
-                                                                pPrivateKeyTemplate,
-                                                                ulPrivateKeyAttributeCount,
-                                                                privateKeyAttributeBitmask,
-                                                                privateKeyLabel,
-                                                                privateKeyId,
-                                                                privateKeyClass,
-                                                                privateKeyType);
-            if (CKR_OK != rv)
-            {
-                break;
-            }
+                if (CKR_OK == rv)
+                {
+                    *phPublicKey  = publicKeyHandle;
+                    *phPrivateKey = privateKeyHandle;
+                }
+                else
+                {
+                    *phPublicKey  = CK_INVALID_HANDLE;
+                    *phPrivateKey = CK_INVALID_HANDLE;
+                }
+            } while (false);
 
-            rv = attributeHelpers.getModulusLength(pPublicKeyTemplate,
-                                                   ulPublicKeyAttributeCount,
-                                                   hasModulusLength,
-                                                   modulusLength);
-            if (CKR_OK != rv)
-            {
-                break;
-            }
+            return rv;
+        }
 
-            if (!hasModulusLength)
-            {
-                rv = CKR_TEMPLATE_INCOMPLETE;
-                break;
-            }
-
-            if (publicKeyId != privateKeyId)
-            {
-                rv = CKR_TEMPLATE_INCONSISTENT;
-                break;
-            }
-
-            attributeHelpers.populateAttributes(privateKeyAttributeBitmask,
-                                                privateKeyLabel,
-                                                privateKeyId,
-                                                keyGenMechanism,
-                                                privateKeyClass,
-                                                privateKeyType,
-                                                privateKeyAttributes);
-
-            sgxStatus = generateAsymmetricKey(enclaveHelpers.getSgxEnclaveId(),
-                                              reinterpret_cast<int32_t*>(&enclaveStatus),
-                                              &publicKeyHandle,
-                                              &privateKeyHandle,
-                                              modulusLength);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-            *phPublicKey  = publicKeyHandle;
-            *phPrivateKey = privateKeyHandle;
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV AsymmetricProvider::encrypt(const uint32_t&   keyHandle,
-                                      const uint8_t*    sourceBuffer,
-                                      const uint32_t&   sourceBufferLen,
-                                      uint8_t*          destBuffer,
-                                      const uint32_t&   destBufferLen,
-                                      uint32_t&         destBufferRequiredLength)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        RsaPadding          paddingScheme   = RsaPadding::rsaPkcs1Oaep; // This is the only padding scheme supported.
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
+        //---------------------------------------------------------------------------------------------
+        CK_RV importRsaPlatformBoundKey(const std::vector<uint8_t>& platformBoundKey,
+                                        CK_OBJECT_HANDLE_PTR        phPublicKey,
+                                        CK_OBJECT_HANDLE_PTR        phPrivateKey)
         {
-            if (!sourceBuffer)
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            uint32_t       publicKeyHandle  = 0;
+            uint32_t       privateKeyHandle = 0;
+            EnclaveHelpers enclaveHelpers;
+
+            do
             {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
+                if (!phPublicKey || !phPrivateKey)
+                {
+                    rv = CKR_ARGUMENTS_BAD;
+                    break;
+                }
 
-            sgxStatus = asymmetricEncrypt(enclaveHelpers.getSgxEnclaveId(),
-                                          reinterpret_cast<int32_t*>(&enclaveStatus),
-                                          keyHandle,
-                                          sourceBuffer,
-                                          sourceBufferLen,
-                                          destBuffer,
-                                          destBufferLen,
-                                          &destBufferRequiredLength,
-                                          static_cast<uint8_t>(paddingScheme));
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV AsymmetricProvider::decrypt(const uint32_t&   keyHandle,
-                                      const uint8_t*    encryptedBuffer,
-                                      const uint32_t&   encryptedBufferLen,
-                                      uint8_t*          destBuffer,
-                                      const uint32_t&   destBufferLen,
-                                      uint32_t&         destBufferRequiredLength)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        RsaPadding          paddingScheme   = RsaPadding::rsaPkcs1Oaep; // This is the only padding scheme supported.
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            if (!encryptedBuffer)
-            {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
-
-            sgxStatus = asymmetricDecrypt(enclaveHelpers.getSgxEnclaveId(),
-                                          reinterpret_cast<int32_t*>(&enclaveStatus),
-                                          keyHandle,
-                                          encryptedBuffer,
-                                          encryptedBufferLen,
-                                          destBuffer,
-                                          destBufferLen,
-                                          &destBufferRequiredLength,
-                                          static_cast<uint8_t>(paddingScheme));
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV AsymmetricProvider::sign(const uint32_t&   keyHandle,
-                                   const uint8_t*    sourceBuffer,
-                                   const uint32_t&   sourceBufferLen,
-                                   uint8_t*          destBuffer,
-                                   const uint32_t&   destBufferLen,
-                                   uint32_t&         destBufferRequiredLength,
-                                   const RsaPadding& rsaPadding,
-                                   const HashMode&   hashMode)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            if (!sourceBuffer)
-            {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
-
-            sgxStatus = asymmetricSign(enclaveHelpers.getSgxEnclaveId(),
-                                       reinterpret_cast<int32_t*>(&enclaveStatus),
-                                       keyHandle,
-                                       sourceBuffer,
-                                       sourceBufferLen,
-                                       destBuffer,
-                                       destBufferLen,
-                                       &destBufferRequiredLength,
-                                       hashAlgorithmIdSha256,
-                                       static_cast<uint8_t>(rsaPadding),
-                                       static_cast<uint8_t>(hashMode),
-                                       saltSizeBytes);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV AsymmetricProvider::verify(const uint32_t&    keyHandle,
-                                     const uint8_t*     sourceBuffer,
-                                     const uint32_t&    sourceBufferLen,
-                                     uint8_t*           destBuffer,
-                                     uint32_t           destBufferLen,
-                                     const RsaPadding&  rsaPadding,
-                                     const HashMode&    hashMode)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            if (!sourceBuffer)
-            {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
-
-            sgxStatus = asymmetricVerify(enclaveHelpers.getSgxEnclaveId(),
-                                         reinterpret_cast<int32_t*>(&enclaveStatus),
-                                         keyHandle,
-                                         sourceBuffer,
-                                         sourceBufferLen,
-                                         destBuffer,
-                                         destBufferLen,
-                                         hashAlgorithmIdSha256,
-                                         static_cast<uint8_t>(rsaPadding),
-                                         static_cast<uint8_t>(hashMode),
-                                         saltSizeBytes);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV AsymmetricProvider::destroyKey(const uint32_t&                           keyHandle,
-                                         std::shared_ptr<AsymmetricKeyHandleCache> keyHandleCache)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            // Clean up keyHandle in enclave cache
-            sgxStatus = destroyAsymmetricKey(enclaveHelpers.getSgxEnclaveId(),
-                                             reinterpret_cast<int32_t*>(&enclaveStatus),
-                                             keyHandle);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-            // Clean up keyHandle in provider cache
-            keyHandleCache->remove(keyHandle);
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV AsymmetricProvider::wrapKey(const uint32_t&   wrappingKeyHandle,
-                                      const uint32_t&   keyHandleData,
-                                      uint8_t*          destBuffer,
-                                      const uint32_t&   destBufferLen,
-                                      uint32_t&         destBufferLenRequired,
-                                      const RsaPadding& rsaPadding)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            sgxStatus = wrapWithAsymmetricKey(enclaveHelpers.getSgxEnclaveId(),
-                                              reinterpret_cast<int32_t*>(&enclaveStatus),
-                                              wrappingKeyHandle,
-                                              keyHandleData,
-                                              destBuffer,
-                                              destBufferLen,
-                                              &destBufferLenRequired,
-                                              static_cast<uint8_t>(rsaPadding));
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV AsymmetricProvider::platformbindKey(const uint32_t&   keyHandle,
-                                              uint8_t*          destBuffer,
-                                              const uint32_t&   destBufferLen,
-                                              uint32_t&         destBufferLenRequired)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            sgxStatus = platformBindAsymmetricKey(enclaveHelpers.getSgxEnclaveId(),
-                                                 reinterpret_cast<int32_t*>(&enclaveStatus),
-                                                 keyHandle,
-                                                 destBuffer,
-                                                 destBufferLen,
-                                                 &destBufferLenRequired);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV AsymmetricProvider::unwrapKey(const uint32_t&   unwrappingKeyHandle,
-                                        uint32_t*         keyHandle,
-                                        const uint8_t*    sourceBuffer,
-                                        const uint32_t&   sourceBufferLen,
-                                        const RsaPadding& rsaPadding)
-    {
-        CK_RV               rv                 = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus          = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus      = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        uint32_t            unwrappedKeyHandle = 0;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            if (!keyHandle ||
-                !sourceBuffer)
-            {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
-
-            sgxStatus = unwrapWithAsymmetricKey(enclaveHelpers.getSgxEnclaveId(),
+                sgxStatus = unsealAsymmetricKey(enclaveHelpers.getSgxEnclaveId(),
                                                 reinterpret_cast<int32_t*>(&enclaveStatus),
-                                                unwrappingKeyHandle,
-                                                &unwrappedKeyHandle,
-                                                sourceBuffer,
-                                                sourceBufferLen,
-                                                static_cast<uint8_t>(rsaPadding));
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
+                                                &publicKeyHandle,
+                                                &privateKeyHandle,
+                                                platformBoundKey.data(), platformBoundKey.size());
 
-            if (CKR_OK != rv)
-            {
-                break;
-            }
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
 
-            *keyHandle = unwrappedKeyHandle;
+                if (CKR_OK == rv)
+                {
+                    *phPublicKey  = publicKeyHandle;
+                    *phPrivateKey = privateKeyHandle;
+                }
+                else
+                {
+                    *phPublicKey  = CK_INVALID_HANDLE;
+                    *phPrivateKey = CK_INVALID_HANDLE;
+                }
 
-        } while (false);
+            } while (false);
 
-        ulock.unlock();
-        return rv;
-    }
+            return rv;
+        }
 
-    //---------------------------------------------------------------------------------------------
-    CK_RV AsymmetricProvider::importPlatformBoundKey(const CK_ATTRIBUTE_PTR         pPublicKeyTemplate,
-                                                     const CK_ULONG&                ulPublicKeyAttributeCount,
-                                                     const CK_ATTRIBUTE_PTR         pPrivateKeyTemplate,
-                                                     const CK_ULONG&                ulPrivateKeyAttributeCount,
-                                                     CK_OBJECT_HANDLE_PTR           phPublicKey,
-                                                     CK_OBJECT_HANDLE_PTR           phPrivateKey,
-                                                     const std::vector<uint8_t>&    platformBoundKey,
-                                                     Attributes&                    publicKeyAttributes,
-                                                     Attributes&                    privateKeyAttributes)
-    {
-        CK_RV                  rv            = CKR_FUNCTION_FAILED;
-        sgx_status_t           sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus         enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers         enclaveHelpers;
-        AttributeHelpers       attributeHelpers;
-        KeyGenerationMechanism keyGenMechanism;
-        std::string            publicKeyLabel, privateKeyLabel, publicKeyId, privateKeyId;
-        CK_OBJECT_CLASS        publicKeyClass, privateKeyClass;
-        CK_KEY_TYPE            publicKeyType,  privateKeyType;
-        uint32_t               publicKeyAttributeBitmask, privateKeyAttributeBitmask;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
+        //---------------------------------------------------------------------------------------------
+        CK_RV encrypt(const uint32_t& keyHandle,
+                      const uint8_t*  sourceBuffer,
+                      const uint32_t& sourceBufferLen,
+                      uint8_t*        destBuffer,
+                      const uint32_t& destBufferLen,
+                      uint32_t*       destBufferRequiredLength)
         {
-            if (!pPublicKeyTemplate  ||
-                !pPrivateKeyTemplate ||
-                !phPublicKey         ||
-                !phPrivateKey)
+            CK_RV          rv              = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            RsaPadding     paddingScheme   = RsaPadding::rsaPkcs1Oaep; // This is the only padding scheme supported.
+            EnclaveHelpers enclaveHelpers;
+
+            do
             {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
+                if (!sourceBuffer)
+                {
+                    rv = CKR_ARGUMENTS_BAD;
+                    break;
+                }
 
-            keyGenMechanism = KeyGenerationMechanism::rsaImportPbindPublicKey;
-            rv = attributeHelpers.extractAttributesFromTemplate(keyGenMechanism,
-                                                                pPublicKeyTemplate,
-                                                                ulPublicKeyAttributeCount,
-                                                                publicKeyAttributeBitmask,
-                                                                publicKeyLabel,
-                                                                publicKeyId,
-                                                                publicKeyClass,
-                                                                publicKeyType);
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-            attributeHelpers.populateAttributes(publicKeyAttributeBitmask,
-                                                publicKeyLabel,
-                                                publicKeyId,
-                                                keyGenMechanism,
-                                                publicKeyClass,
-                                                publicKeyType,
-                                                publicKeyAttributes);
-
-            keyGenMechanism = KeyGenerationMechanism::rsaImportPbindPrivateKey;
-            rv = attributeHelpers.extractAttributesFromTemplate(keyGenMechanism,
-                                                                pPrivateKeyTemplate,
-                                                                ulPrivateKeyAttributeCount,
-                                                                privateKeyAttributeBitmask,
-                                                                privateKeyLabel,
-                                                                privateKeyId,
-                                                                privateKeyClass,
-                                                                privateKeyType);
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-            if (publicKeyId != privateKeyId)
-            {
-                rv = CKR_TEMPLATE_INCONSISTENT;
-                break;
-            }
-
-            attributeHelpers.populateAttributes(privateKeyAttributeBitmask,
-                                                privateKeyLabel,
-                                                privateKeyId,
-                                                keyGenMechanism,
-                                                privateKeyClass,
-                                                privateKeyType,
-                                                privateKeyAttributes);
-
-            sgxStatus = unwrapAndImportPlatformBoundAsymmetricKey(enclaveHelpers.getSgxEnclaveId(),
-                                                                  reinterpret_cast<int32_t*>(&enclaveStatus),
-                                                                  reinterpret_cast<uint32_t*>(phPublicKey),
-                                                                  reinterpret_cast<uint32_t*>(phPrivateKey),
-                                                                  platformBoundKey.data(),
-                                                                  platformBoundKey.size());
-
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV AsymmetricProvider::exportKey(const uint32_t& keyHandle,
-                                        uint8_t*        destBuffer,
-                                        const uint32_t& destBufferLen,
-                                        uint32_t&       destBufferLenRequired)
-    {
-        CK_RV                       rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t                sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus              enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        uint32_t                    modulusSize     = 0;
-        uint32_t                    exponentSize    = 0;
-        uint32_t                    offset          = 0;
-        EnclaveHelpers              enclaveHelpers;
-        CK_RSA_PUBLIC_KEY_PARAMS    rsaPublicKeyParams{};
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            offset = sizeof(CK_RSA_PUBLIC_KEY_PARAMS);
-            sgxStatus = asymmetricExportKey(enclaveHelpers.getSgxEnclaveId(),
+                sgxStatus = asymmetricEncrypt(enclaveHelpers.getSgxEnclaveId(),
                                             reinterpret_cast<int32_t*>(&enclaveStatus),
                                             keyHandle,
-                                            (!destBuffer) ? nullptr : destBuffer + offset,
-                                            (!destBuffer) ? destBufferLen : destBufferLen - offset,
-                                            &destBufferLenRequired,
-                                            &modulusSize,
-                                            &exponentSize);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
+                                            sourceBuffer, sourceBufferLen,
+                                            destBuffer,   destBufferLen,
+                                            destBufferRequiredLength,
+                                            static_cast<uint8_t>(paddingScheme));
 
-            if (CKR_OK != rv)
-            {
-                destBufferLenRequired = 0;
-                break;
-            }
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
 
-            destBufferLenRequired += sizeof(CK_RSA_PUBLIC_KEY_PARAMS);
-            if (destBuffer)
-            {
-                rsaPublicKeyParams.ulExponentLen    = exponentSize;
-                rsaPublicKeyParams.ulModulusLen     = modulusSize;
-                memcpy(destBuffer, &rsaPublicKeyParams, sizeof(CK_RSA_PUBLIC_KEY_PARAMS));
-            }
+            } while (false);
 
-            rv = CKR_OK;
-        } while (false);
+            return rv;
+        }
 
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV AsymmetricProvider::importKey(uint32_t*       keyHandle,
-                                        const uint8_t*  sourceBuffer,
-                                        const uint32_t& sourceBufferLen)
-    {
-        CK_RV                       rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t                sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus              enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        uint32_t                    offset          = sizeof(CK_RSA_PUBLIC_KEY_PARAMS);
-        EnclaveHelpers              enclaveHelpers;
-        std::vector<uint8_t>        modulus;
-        std::vector<uint8_t>        exponent;
-        CK_RSA_PUBLIC_KEY_PARAMS    rsaPublicKeyParams{};
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
+        // //---------------------------------------------------------------------------------------------
+        CK_RV decrypt(const uint32_t& keyHandle,
+                      const uint8_t*  encryptedBuffer,
+                      const uint32_t& encryptedBufferLen,
+                      uint8_t*        destBuffer,
+                      const uint32_t& destBufferLen,
+                      uint32_t*       destBufferRequiredLength)
         {
-            if (!keyHandle ||
-                !sourceBuffer)
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            RsaPadding     paddingScheme = RsaPadding::rsaPkcs1Oaep; // This is the only padding scheme supported.
+            EnclaveHelpers enclaveHelpers;
+
+            do
             {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
+                if (!encryptedBuffer)
+                {
+                    rv = CKR_ARGUMENTS_BAD;
+                    break;
+                }
 
-            memcpy(&rsaPublicKeyParams, sourceBuffer, sizeof(CK_RSA_PUBLIC_KEY_PARAMS));
+                sgxStatus = asymmetricDecrypt(enclaveHelpers.getSgxEnclaveId(),
+                                              reinterpret_cast<int32_t*>(&enclaveStatus),
+                                              keyHandle,
+                                              encryptedBuffer, encryptedBufferLen,
+                                              destBuffer, destBufferLen,
+                                              destBufferRequiredLength,
+                                              static_cast<uint8_t>(paddingScheme));
 
-            modulus.resize(rsaPublicKeyParams.ulModulusLen);
-            memcpy(modulus.data(), sourceBuffer + offset, rsaPublicKeyParams.ulModulusLen);
-            offset += rsaPublicKeyParams.ulModulusLen;
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
 
-            exponent.resize(rsaPublicKeyParams.ulExponentLen);
-            memcpy(exponent.data(), sourceBuffer + offset, rsaPublicKeyParams.ulExponentLen);
+            } while (false);
 
-            sgxStatus = asymmetricImportKey(enclaveHelpers.getSgxEnclaveId(),
-                                            reinterpret_cast<int32_t*>(&enclaveStatus),
-                                            keyHandle,
-                                            modulus.data(),
-                                            modulus.size(),
-                                            exponent.data(),
-                                            exponent.size());
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
+            return rv;
+        }
 
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV appendQuote(const uint32_t&   keyHandle,
-                      const uint8_t*    spid,
-                      const uint32_t&   spidLen,
-                      const uint8_t*    sigRL,
-                      const uint32_t    sigRLLen,
-                      const uint32_t&   signatureType,
-                      uint8_t*          quoteBuffer,
-                      const uint32_t&   quoteBufferLen)
-    {
-        CK_RV                       rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t                sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus              enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        sgx_target_info_t           targetInfo      = { 0 };
-        sgx_epid_group_id_t         gid             = { 0 };
-        sgx_quote_t*                sgxQuote        = reinterpret_cast<sgx_quote_t*>(quoteBuffer);
-        sgx_quote_sign_type_t       quoteSignType;
-        sgx_report_t                enclaveReport   = { 0 };
-        EnclaveHelpers              enclaveHelpers;
-
-        do
+        //---------------------------------------------------------------------------------------------
+        CK_RV wrapKey(const uint32_t&       wrappingKeyHandle,
+                      const uint32_t&       keyHandleData,
+                      const RsaCryptParams& rsaCryptParams,
+                      uint8_t*              destBuffer,
+                      const uint32_t&       destBufferLen,
+                      uint32_t*             destBufferLenRequired)
         {
-            if (!spid  ||
-                !quoteBuffer)
-            {
-                rv = CKR_DATA_INVALID;
-                break;
-            }
+            CK_RV          rv              = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            EnclaveHelpers enclaveHelpers;
 
-            sgxStatus = sgx_init_quote(&targetInfo, &gid);
-            if (sgx_status_t::SGX_SUCCESS != sgxStatus)
+            do
             {
-                rv = CKR_GENERAL_ERROR;
-                break;
-            }
+                sgxStatus = wrapWithAsymmetricKey(enclaveHelpers.getSgxEnclaveId(),
+                                                  reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                  wrappingKeyHandle,
+                                                  keyHandleData,
+                                                  destBuffer, destBufferLen,
+                                                  destBufferLenRequired,
+                                                  static_cast<uint8_t>(rsaCryptParams.rsaPadding));
 
-            if (LINKABLE_SIGNATURE == signatureType)
-            {
-                quoteSignType = SGX_LINKABLE_SIGNATURE;
-            }
-            else if (UNLINKABLE_SIGNATURE == signatureType)
-            {
-                quoteSignType = SGX_UNLINKABLE_SIGNATURE;
-            }
-            else
-            {
-                rv = CKR_GENERAL_ERROR;
-                break;
-            }
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
 
-            sgxStatus = createReportForKeyHandle(enclaveHelpers.getSgxEnclaveId(),
-                                                 reinterpret_cast<int*>(&enclaveStatus),
-                                                 keyHandle,
-                                                 &targetInfo,
-                                                 &enclaveReport);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
+            } while (false);
 
-            if (CKR_OK != rv)
-            {
-                break;
-            }
+            return rv;
+        }
 
-            sgxStatus = sgx_get_quote(&enclaveReport,
-                                      quoteSignType,
-                                      reinterpret_cast<const sgx_spid_t*>(spid),
-                                      nullptr,
-                                      sigRL,
-                                      sigRLLen,
-                                      nullptr,
-                                      sgxQuote,
-                                      quoteBufferLen);
-
-            if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-                break;
-            }
-
-            rv = CKR_OK;
-        } while (false);
-
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV AsymmetricProvider::exportQuotePublicKey(const uint32_t&  keyHandle,
-                                                   const uint8_t*   spid,
-                                                   const uint32_t&  spidLen,
-                                                   const uint8_t*   sigRL,
-                                                   const uint32_t&  sigRLLen,
-                                                   const uint32_t&  signatureType,
-                                                   uint8_t*         destBuffer,
-                                                   const uint32_t&  destBufferLen,
-                                                   uint32_t&        destBufferLenRequired)
-    {
-        CK_RV                       rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t                sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus              enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        uint32_t                    modulusSize     = 0;
-        uint32_t                    exponentSize    = 0;
-        uint32_t                    offset          = 0;
-        uint32_t                    quoteLength     = 0;
-        uint32_t                    publicKeyLength = 0;
-        EnclaveHelpers              enclaveHelpers;
-        CK_RSA_PUBLIC_KEY_PARAMS    rsaPublicKeyParams{};
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
+        //---------------------------------------------------------------------------------------------
+        CK_RV platformbindKey(const uint32_t& keyHandle,
+                              uint8_t*        destBuffer,
+                              const uint32_t& destBufferLen,
+                              uint32_t*       destBufferLenRequired)
         {
-            if (!spid)
-            {
-                rv = CKR_DATA_INVALID;
-                break;
-            }
+            CK_RV               rv              = CKR_FUNCTION_FAILED;
+            sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            EnclaveHelpers      enclaveHelpers;
 
-            offset = sizeof(CK_RSA_PUBLIC_KEY_PARAMS);
-            sgxStatus = asymmetricExportKey(enclaveHelpers.getSgxEnclaveId(),
-                                            reinterpret_cast<int32_t*>(&enclaveStatus),
-                                            keyHandle,
-                                            (!destBuffer) ? nullptr : destBuffer + offset,
-                                            (!destBuffer) ? destBufferLen : destBufferLen - offset,
-                                            &destBufferLenRequired,
-                                            &modulusSize,
-                                            &exponentSize);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
+            do
             {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
+                sgxStatus = platformBindAsymmetricKey(enclaveHelpers.getSgxEnclaveId(),
+                                                      reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                      keyHandle,
+                                                      destBuffer, destBufferLen,
+                                                      destBufferLenRequired);
 
-            if (CKR_OK != rv)
-            {
-                destBufferLenRequired = 0;
-                break;
-            }
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
 
-            destBufferLenRequired += sizeof(CK_RSA_PUBLIC_KEY_PARAMS);
-            publicKeyLength = destBufferLenRequired;
-            if (destBuffer)
-            {
-                rsaPublicKeyParams.ulExponentLen    = exponentSize;
-                rsaPublicKeyParams.ulModulusLen     = modulusSize;
-                memcpy(destBuffer, &rsaPublicKeyParams, sizeof(CK_RSA_PUBLIC_KEY_PARAMS));
-            }
+            } while (false);
 
-            uint32_t quoteLengthTemp = 0;
-            sgx_status_t calcQuoteSizeStatus = sgx_calc_quote_size(sigRL,
-                                                                   sigRLLen,
-                                                                   &quoteLengthTemp);
-            if (sgx_status_t::SGX_SUCCESS == calcQuoteSizeStatus)
-            {
-                quoteLength = quoteLengthTemp;
-            }
-            else
-            {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
+            return rv;
+        }
 
-            destBufferLenRequired += quoteLength;
-            if (!destBuffer)
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV exportPublicKey(const uint32_t& keyHandle,
+                              uint8_t*        destBuffer,
+                              const uint32_t& destBufferLen,
+                              uint32_t*       destBufferLenRequired)
+        {
+            CK_RV                       rv              = CKR_FUNCTION_FAILED;
+            sgx_status_t                sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus              enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            uint32_t                    modulusSize     = 0;
+            uint32_t                    exponentSize    = 0;
+            uint32_t                    offset          = 0;
+            EnclaveHelpers              enclaveHelpers;
+            CK_RSA_PUBLIC_KEY_PARAMS    rsaPublicKeyParams{};
+
+            do
             {
+                if (!destBufferLenRequired)
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
+
+                offset = sizeof(CK_RSA_PUBLIC_KEY_PARAMS);
+                sgxStatus = asymmetricExportKey(enclaveHelpers.getSgxEnclaveId(),
+                                                reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                keyHandle,
+                                                (!destBuffer) ? nullptr : destBuffer + offset,
+                                                (!destBuffer) ? destBufferLen : destBufferLen - offset,
+                                                destBufferLenRequired,
+                                                &modulusSize,
+                                                &exponentSize);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+                if (CKR_OK != rv)
+                {
+                    *destBufferLenRequired = 0;
+                    break;
+                }
+
+                *destBufferLenRequired += sizeof(CK_RSA_PUBLIC_KEY_PARAMS);
+                if (destBuffer)
+                {
+                    rsaPublicKeyParams.ulExponentLen = exponentSize;
+                    rsaPublicKeyParams.ulModulusLen  = modulusSize;
+                    memcpy(destBuffer, &rsaPublicKeyParams, sizeof(CK_RSA_PUBLIC_KEY_PARAMS));
+                }
+
                 rv = CKR_OK;
-                break;
-            }
+            } while (false);
 
-            if (destBufferLen < destBufferLenRequired)
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        static CK_RV appendQuote(const uint32_t& keyHandle,
+                                 const uint8_t*  spid,
+                                 const uint32_t& spidLen,
+                                 const uint8_t*  sigRL,
+                                 const uint32_t  sigRLLen,
+                                 const uint32_t& signatureType,
+                                 uint8_t*        quoteBuffer,
+                                 const uint32_t& quoteBufferLen)
+        {
+            CK_RV                       rv              = CKR_FUNCTION_FAILED;
+            sgx_status_t                sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus              enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            sgx_target_info_t           targetInfo      = { 0 };
+            sgx_epid_group_id_t         gid             = { 0 };
+            sgx_quote_t*                sgxQuote        = reinterpret_cast<sgx_quote_t*>(quoteBuffer);
+            sgx_quote_sign_type_t       quoteSignType;
+            sgx_report_t                enclaveReport   = { 0 };
+            EnclaveHelpers              enclaveHelpers;
+
+            do
             {
-                rv = CKR_BUFFER_TOO_SMALL;
-                memset(destBuffer, 0, destBufferLen);
-                break;
-            }
+                if (!spid  ||
+                    !quoteBuffer)
+                {
+                    rv = CKR_DATA_INVALID;
+                    break;
+                }
 
-            rv = appendQuote(keyHandle,
-                             spid,
-                             spidLen,
-                             sigRL,
-                             sigRLLen,
-                             signatureType,
-                             destBuffer + publicKeyLength,
-                             quoteLength);
-            if (CKR_OK != rv)
+                sgxStatus = sgx_init_quote(&targetInfo, &gid);
+                if (sgx_status_t::SGX_SUCCESS != sgxStatus)
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
+
+                if (LINKABLE_SIGNATURE == signatureType)
+                {
+                    quoteSignType = SGX_LINKABLE_SIGNATURE;
+                }
+                else if (UNLINKABLE_SIGNATURE == signatureType)
+                {
+                    quoteSignType = SGX_UNLINKABLE_SIGNATURE;
+                }
+                else
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
+
+                sgxStatus = createReportForKeyHandle(enclaveHelpers.getSgxEnclaveId(),
+                                                     reinterpret_cast<int*>(&enclaveStatus),
+                                                     keyHandle,
+                                                     &targetInfo,
+                                                     &enclaveReport);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+                if (CKR_OK != rv)
+                {
+                    break;
+                }
+
+                sgxStatus = sgx_get_quote(&enclaveReport,
+                                          quoteSignType,
+                                          reinterpret_cast<const sgx_spid_t*>(spid),
+                                          nullptr,
+                                          sigRL, sigRLLen,
+                                          nullptr,
+                                          sgxQuote,
+                                          quoteBufferLen);
+
+                if (sgx_status_t::SGX_SUCCESS != sgxStatus)
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
+
+                rv = CKR_OK;
+            } while (false);
+
+            return rv;
+        }
+
+#ifdef DCAP_SUPPORT
+        //---------------------------------------------------------------------------------------------
+        static CK_RV appendQuote(const uint32_t&    keyHandle,
+                                 sgx_target_info_t* targetInfo,
+                                 uint8_t*           quoteBuffer,
+                                 const uint32_t&    quoteBufferLen)
+        {
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            quote3_error_t qrv           = SGX_QL_SUCCESS;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            sgx_report_t   enclaveReport = { 0 };
+            EnclaveHelpers enclaveHelpers;
+            sgx_status_t   sgxStatus{SGX_SUCCESS};
+
+            do
             {
-                memset(destBuffer, 0, destBufferLenRequired);
-                destBufferLenRequired = 0;
-                break;
-            }
-        } while (false);
+                if (!quoteBuffer)
+                {
+                    rv = CKR_DATA_INVALID;
+                    break;
+                }
 
-        ulock.unlock();
-        return rv;
+                sgxStatus = createReportForKeyHandle(enclaveHelpers.getSgxEnclaveId(),
+                                                     reinterpret_cast<int*>(&enclaveStatus),
+                                                     keyHandle,
+                                                     targetInfo,
+                                                     &enclaveReport);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+                if (CKR_OK != rv)
+                {
+                    break;
+                }
+
+                qrv = sgx_qe_get_quote(&enclaveReport, quoteBufferLen, quoteBuffer);
+
+                if (SGX_QL_SUCCESS != qrv)
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
+
+                rv = CKR_OK;
+            } while (false);
+
+            return rv;
+        }
+#endif
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV exportQuoteWithRsaPublicKey(const uint32_t&           keyHandle,
+                                          const RsaEpidQuoteParams& rsaQuoteWrapParams,
+                                          uint8_t*                  destBuffer,
+                                          const uint32_t&           destBufferLen,
+                                          uint32_t*                 destBufferLenRequired)
+        {
+            CK_RV                       rv              = CKR_FUNCTION_FAILED;
+            sgx_status_t                sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus              enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            uint32_t                    modulusSize     = 0;
+            uint32_t                    exponentSize    = 0;
+            uint32_t                    offset          = 0;
+            uint32_t                    quoteLength     = 0;
+            uint32_t                    publicKeyLength = 0;
+            EnclaveHelpers              enclaveHelpers;
+            CK_RSA_PUBLIC_KEY_PARAMS    rsaPublicKeyParams{};
+
+            do
+            {
+                if (!destBufferLenRequired)
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
+
+                *destBufferLenRequired = 0;
+
+                if (!rsaQuoteWrapParams.spid.data() || !rsaQuoteWrapParams.spid.size())
+                {
+                    rv = CKR_DATA_INVALID;
+                    break;
+                }
+
+                offset = sizeof(CK_RSA_PUBLIC_KEY_PARAMS);
+                sgxStatus = asymmetricExportKey(enclaveHelpers.getSgxEnclaveId(),
+                                                reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                keyHandle,
+                                                (!destBuffer) ? nullptr : destBuffer + offset,
+                                                (!destBuffer) ? destBufferLen : destBufferLen - offset,
+                                                destBufferLenRequired,
+                                                &modulusSize,
+                                                &exponentSize);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+                if (CKR_OK != rv)
+                {
+                    *destBufferLenRequired = 0;
+                    break;
+                }
+
+                *destBufferLenRequired += sizeof(CK_RSA_PUBLIC_KEY_PARAMS);
+                publicKeyLength = *destBufferLenRequired;
+                if (destBuffer && destBufferLen >= sizeof(CK_RSA_PUBLIC_KEY_PARAMS))
+                {
+                    rsaPublicKeyParams.ulExponentLen    = exponentSize;
+                    rsaPublicKeyParams.ulModulusLen     = modulusSize;
+                    memcpy(destBuffer, &rsaPublicKeyParams, sizeof(CK_RSA_PUBLIC_KEY_PARAMS));
+                }
+
+                uint32_t quoteLengthTemp = 0;
+                sgx_status_t calcQuoteSizeStatus = sgx_calc_quote_size(rsaQuoteWrapParams.sigRL.data(),
+                                                                       rsaQuoteWrapParams.sigRL.size(),
+                                                                       &quoteLengthTemp);
+                if (sgx_status_t::SGX_SUCCESS == calcQuoteSizeStatus)
+                {
+                    quoteLength = quoteLengthTemp;
+                }
+                else
+                {
+                    rv = CKR_ARGUMENTS_BAD;
+                    break;
+                }
+
+                *destBufferLenRequired += quoteLength;
+                if (!destBuffer)
+                {
+                    rv = CKR_OK;
+                    break;
+                }
+
+                if (destBufferLen < *destBufferLenRequired)
+                {
+                    rv = CKR_BUFFER_TOO_SMALL;
+                    memset(destBuffer, 0, destBufferLen);
+                    break;
+                }
+
+                rv = appendQuote(keyHandle,
+                                 rsaQuoteWrapParams.spid.data(),  rsaQuoteWrapParams.spid.size(),
+                                 rsaQuoteWrapParams.sigRL.data(), rsaQuoteWrapParams.sigRL.size(),
+                                 rsaQuoteWrapParams.signatureType,
+                                 destBuffer + publicKeyLength,
+                                 quoteLength);
+                if (CKR_OK != rv)
+                {
+                    memset(destBuffer, 0, *destBufferLenRequired);
+                    *destBufferLenRequired = 0;
+                    break;
+                }
+            } while (false);
+
+            return rv;
+        }
+
+#ifdef DCAP_SUPPORT
+        //---------------------------------------------------------------------------------------------
+        CK_RV exportQuoteWithRsaPublicKey(const uint32_t&               keyHandle,
+                                          const RsaEcdsaQuoteParams&    rsaQuoteParams,
+                                          uint8_t*                      destBuffer,
+                                          const uint32_t&               destBufferLen,
+                                          uint32_t*                     destBufferLenRequired)
+        {
+            CK_RV                       rv              = CKR_FUNCTION_FAILED;
+            sgx_status_t                sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus              enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            uint32_t                    modulusSize     = 0;
+            uint32_t                    exponentSize    = 0;
+            uint32_t                    offset          = 0;
+            uint32_t                    quoteLength     = 0;
+            uint32_t                    publicKeyLength = 0;
+            EnclaveHelpers              enclaveHelpers;
+            CK_RSA_PUBLIC_KEY_PARAMS    rsaPublicKeyParams{};
+
+            do
+            {
+                if (!destBufferLenRequired)
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
+
+                *destBufferLenRequired = 0;
+
+                if (!(SGX_QL_PERSISTENT == rsaQuoteParams.qlPolicy ||
+                      SGX_QL_EPHEMERAL  == rsaQuoteParams.qlPolicy ||
+                      SGX_QL_DEFAULT    == rsaQuoteParams.qlPolicy))
+                {
+                    rv = CKR_ARGUMENTS_BAD;
+                }
+
+                offset = sizeof(CK_RSA_PUBLIC_KEY_PARAMS);
+                sgxStatus = asymmetricExportKey(enclaveHelpers.getSgxEnclaveId(),
+                                                reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                keyHandle,
+                                                (!destBuffer) ? nullptr : destBuffer + offset,
+                                                (!destBuffer) ? destBufferLen : destBufferLen - offset,
+                                                destBufferLenRequired,
+                                                &modulusSize,
+                                                &exponentSize);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+                if (CKR_OK != rv)
+                {
+                    *destBufferLenRequired = 0;
+                    break;
+                }
+
+                *destBufferLenRequired += sizeof(CK_RSA_PUBLIC_KEY_PARAMS);
+                publicKeyLength = *destBufferLenRequired;
+                if (destBuffer && destBufferLen >= sizeof(CK_RSA_PUBLIC_KEY_PARAMS))
+                {
+                    rsaPublicKeyParams.ulExponentLen    = exponentSize;
+                    rsaPublicKeyParams.ulModulusLen     = modulusSize;
+                    memcpy(destBuffer, &rsaPublicKeyParams, sizeof(CK_RSA_PUBLIC_KEY_PARAMS));
+                }
+
+                quote3_error_t qrv = SGX_QL_SUCCESS;
+
+                qrv = sgx_qe_set_enclave_load_policy(static_cast<sgx_ql_request_policy_t>(rsaQuoteParams.qlPolicy));
+                if(SGX_QL_SUCCESS != qrv)
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
+
+                sgx_target_info_t targetInfo{0};
+                qrv = sgx_qe_get_target_info(&targetInfo);
+                if (SGX_QL_SUCCESS != qrv)
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
+
+                uint32_t quoteLengthTemp = 0;
+                qrv = sgx_qe_get_quote_size(&quoteLengthTemp);
+
+                if (SGX_QL_SUCCESS == qrv)
+                {
+                    quoteLength = quoteLengthTemp;
+                }
+                else
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
+
+                *destBufferLenRequired += quoteLength;
+                if (!destBuffer)
+                {
+                    rv = CKR_OK;
+                    break;
+                }
+
+                if (destBufferLen < *destBufferLenRequired)
+                {
+                    rv = CKR_BUFFER_TOO_SMALL;
+                    memset(destBuffer, 0, destBufferLen);
+                    break;
+                }
+
+                rv = appendQuote(keyHandle,
+                                 &targetInfo,
+                                 destBuffer + publicKeyLength,
+                                 quoteLength);
+
+                qrv = sgx_qe_cleanup_by_policy();
+
+                //TODO: If the cleanup call fails, should we fail the Wrap call?
+
+                if (CKR_OK != rv)
+                {
+                    memset(destBuffer, 0, *destBufferLenRequired);
+                    *destBufferLenRequired = 0;
+                    break;
+                }
+            } while (false);
+
+            return rv;
+        }
+#endif
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV unwrapKey(const uint32_t&       unwrappingKeyHandle,
+                        const uint8_t*        sourceBuffer,
+                        const uint32_t&       sourceBufferLen,
+                        const RsaCryptParams& rsaCryptParams,
+                        uint32_t*             keyHandle)
+        {
+            CK_RV          rv                 = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus          = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus      = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            uint32_t       unwrappedKeyHandle = 0;
+            EnclaveHelpers enclaveHelpers;
+
+            do
+            {
+                if (!keyHandle || !sourceBuffer)
+                {
+                    rv = CKR_ARGUMENTS_BAD;
+                    break;
+                }
+
+                sgxStatus = unwrapWithAsymmetricKey(enclaveHelpers.getSgxEnclaveId(),
+                                                    reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                    unwrappingKeyHandle,
+                                                    &unwrappedKeyHandle,
+                                                    sourceBuffer, sourceBufferLen,
+                                                    static_cast<uint8_t>(rsaCryptParams.rsaPadding));
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+                if (CKR_OK != rv)
+                {
+                    break;
+                }
+
+                *keyHandle = unwrappedKeyHandle;
+
+            } while (false);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV importKey(const uint8_t*  sourceBuffer,
+                        const uint32_t& sourceBufferLen,
+                        uint32_t*       keyHandle)
+        {
+            CK_RV                    rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t             sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus           enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            uint32_t                 offset        = sizeof(CK_RSA_PUBLIC_KEY_PARAMS);
+            EnclaveHelpers           enclaveHelpers;
+            std::vector<uint8_t>     modulus;
+            std::vector<uint8_t>     exponent;
+            CK_RSA_PUBLIC_KEY_PARAMS rsaPublicKeyParams{};
+
+            do
+            {
+                if (!keyHandle || !sourceBuffer)
+                {
+                    rv = CKR_ARGUMENTS_BAD;
+                    break;
+                }
+
+                memcpy(&rsaPublicKeyParams, sourceBuffer, sizeof(CK_RSA_PUBLIC_KEY_PARAMS));
+
+                modulus.resize(rsaPublicKeyParams.ulModulusLen);
+                memcpy(modulus.data(), sourceBuffer + offset, rsaPublicKeyParams.ulModulusLen);
+                offset += rsaPublicKeyParams.ulModulusLen;
+
+                exponent.resize(rsaPublicKeyParams.ulExponentLen);
+                memcpy(exponent.data(), sourceBuffer + offset, rsaPublicKeyParams.ulExponentLen);
+
+                sgxStatus = asymmetricImportKey(enclaveHelpers.getSgxEnclaveId(),
+                                                reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                keyHandle,
+                                                modulus.data(),  modulus.size(),
+                                                exponent.data(), exponent.size());
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+            } while (false);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV sign(const uint32_t&   keyHandle,
+                   const uint8_t*    sourceBuffer,
+                   const uint32_t&   sourceBufferLen,
+                   uint8_t*          destBuffer,
+                   const uint32_t&   destBufferLen,
+                   const RsaPadding& rsaPadding,
+                   const HashMode&   hashMode,
+                   uint32_t*         destBufferRequiredLength)
+        {
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            EnclaveHelpers enclaveHelpers;
+
+            do
+            {
+                if (!sourceBuffer || !destBufferRequiredLength)
+                {
+                    rv = CKR_ARGUMENTS_BAD;
+                    break;
+                }
+
+                sgxStatus = asymmetricSign(enclaveHelpers.getSgxEnclaveId(),
+                                           reinterpret_cast<int32_t*>(&enclaveStatus),
+                                           keyHandle,
+                                           sourceBuffer, sourceBufferLen,
+                                           destBuffer,   destBufferLen,
+                                           destBufferRequiredLength,
+                                           hashAlgorithmIdSha256,
+                                           static_cast<uint8_t>(rsaPadding),
+                                           static_cast<uint8_t>(hashMode),
+                                           saltSizeBytes);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+            } while (false);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV verify(const uint32_t&   keyHandle,
+                     const uint8_t*    sourceBuffer,
+                     const uint32_t&   sourceBufferLen,
+                     uint8_t*          destBuffer,
+                     uint32_t          destBufferLen,
+                     const RsaPadding& rsaPadding,
+                     const HashMode&   hashMode)
+        {
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            EnclaveHelpers enclaveHelpers;
+
+            do
+            {
+                if (!sourceBuffer)
+                {
+                    rv = CKR_ARGUMENTS_BAD;
+                    break;
+                }
+
+                sgxStatus = asymmetricVerify(enclaveHelpers.getSgxEnclaveId(),
+                                             reinterpret_cast<int32_t*>(&enclaveStatus),
+                                             keyHandle,
+                                             sourceBuffer, sourceBufferLen,
+                                             destBuffer,   destBufferLen,
+                                             hashAlgorithmIdSha256,
+                                             static_cast<uint8_t>(rsaPadding),
+                                             static_cast<uint8_t>(hashMode),
+                                             saltSizeBytes);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+            } while (false);
+
+            return rv;
+        }
     }
 }

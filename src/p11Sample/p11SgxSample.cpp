@@ -29,12 +29,18 @@
  *
  */
 
+#include "config.h"
 #include "p11Defines.h"
 #include "Constants.h"
 #include "CryptoEnclaveDefs.h"
 
 #include <iostream>
 #include <vector>
+#include <sgx_quote.h>
+
+#ifdef DCAP_SUPPORT
+#include "sgx_pce.h"
+#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -98,6 +104,8 @@ void cleanUp(CK_FUNCTION_LIST_PTR p11,
 
     // Unload the library..
     unloadLibrary(p11ProviderHandle);
+
+    std::cout << std::endl;
 }
 
 bool encryptTests(CK_MECHANISM_TYPE     mechanismType,
@@ -168,6 +176,23 @@ bool rsaPBINDTests(CK_MECHANISM_TYPE    mechanismType,
                    std::string&         errorMessage);
 
 bool findObjects(CK_SESSION_HANDLE hSession, std::string& errorMessage);
+
+#ifdef DCAP_SUPPORT
+bool customQuoteEcdsa(CK_MECHANISM_TYPE     mechanismType,
+                      CK_SESSION_HANDLE     hSession,
+                      CK_OBJECT_HANDLE      hKey,
+                      std::string&          errorMessage);
+#endif
+
+bool customQuoteEpid(CK_MECHANISM_TYPE     mechanismType,
+                     CK_SESSION_HANDLE     hSession,
+                     CK_OBJECT_HANDLE      hKey,
+                     std::string&          errorMessage);
+
+bool customQuote(CK_MECHANISM_TYPE     mechanismType,
+                 CK_SESSION_HANDLE     hSession,
+                 CK_OBJECT_HANDLE      hKey,
+                 std::string&          errorMessage);
 
 #ifdef IMPORT_RAW_KEY
 bool aesGenerateKeyFromBuffer(CK_SESSION_HANDLE hSession,
@@ -378,7 +403,7 @@ int main()
         exitApp(errorMessage);
     }
 
-    p11Status = p11->C_GetMechanismList(0, NULL_PTR, &mechanismCount);
+    p11Status = p11->C_GetMechanismList(slotID, NULL_PTR, &mechanismCount);
     if (CKR_OK != p11Status)
     {
         cleanUp(p11,
@@ -419,7 +444,7 @@ int main()
         exitApp(errorMessage);
     }
 
-    p11Status = p11->C_GetMechanismList(0, pMechanismList, &mechanismCount);
+    p11Status = p11->C_GetMechanismList(slotID, pMechanismList, &mechanismCount);
     if (CKR_OK != p11Status)
     {
         free(pMechanismList);
@@ -436,7 +461,7 @@ int main()
 
     free(pMechanismList);
 
-    p11Status = p11->C_GetMechanismInfo(0, CKM_AES_KEY_GEN, &mechanismInfo);
+    p11Status = p11->C_GetMechanismInfo(slotID, CKM_AES_KEY_GEN, &mechanismInfo);
     if (CKR_OK != p11Status)
     {
         cleanUp(p11,
@@ -450,7 +475,7 @@ int main()
         exitApp(errorMessage);
     }
 
-    p11Status = p11->C_OpenSession(0, CKF_SERIAL_SESSION | CKF_RW_SESSION, NULL_PTR, NULL_PTR, &hSession);
+    p11Status = p11->C_OpenSession(slotID, CKF_SERIAL_SESSION | CKF_RW_SESSION, NULL_PTR, NULL_PTR, &hSession);
     if (CKR_OK != p11Status)
     {
         cleanUp(p11,
@@ -1032,6 +1057,36 @@ int main()
 
     std::cout << "Finding Objects" << std::endl;
     result = findObjects(hSession, errorMessage);
+    if (!result)
+    {
+        cleanUp(p11,
+                p11ProviderHandle,
+                hSession,
+                hKey,
+                hKeyData,
+                hAsymKey,
+                hAsymPrivateKey);
+        exitApp(errorMessage);
+    }
+
+#ifdef DCAP_SUPPORT
+    std::cout << "Retrieving Quote+Public key - ECDSA" << std::endl;
+    result = customQuote(CKM_EXPORT_ECDSA_QUOTE_RSA_PUBLIC_KEY, hSession, hAsymKey, errorMessage);
+    if (!result)
+    {
+        cleanUp(p11,
+                p11ProviderHandle,
+                hSession,
+                hKey,
+                hKeyData,
+                hAsymKey,
+                hAsymPrivateKey);
+        exitApp(errorMessage);
+    }
+#endif
+
+    std::cout << "Retrieving Quote+Public key - EPID" << std::endl;
+    result = customQuote(CKM_EXPORT_EPID_QUOTE_RSA_PUBLIC_KEY, hSession, hAsymKey, errorMessage);
     if (!result)
     {
         cleanUp(p11,
@@ -2419,7 +2474,6 @@ bool rsaExportImportPublicKey(CK_MECHANISM_TYPE     mechanismType,
     CK_MECHANISM                    mechanism       = { mechanismType, NULL_PTR, 0 };
     CK_ULONG                        exportedKeyLen  = 0UL;
     uint32_t                        offset          = sizeof(CK_RSA_PUBLIC_KEY_PARAMS);
-    CK_BBOOL                        bTrue           = CK_TRUE;
     CK_OBJECT_HANDLE                hImportAsymKey  = 0;
     bool                            result          = false;
     std::vector<CK_BYTE>            modulus;
@@ -2429,10 +2483,7 @@ bool rsaExportImportPublicKey(CK_MECHANISM_TYPE     mechanismType,
     CK_KEY_TYPE                     rsaKeyType           = CKK_RSA;
     CK_OBJECT_CLASS                 rsaPublicKeyClass    = CKO_PUBLIC_KEY;
     CK_UTF8CHAR                     rsaPublicKeyLabel[]  = "RSA Public Key Label";
-    CK_ATTRIBUTE                    asymKeyAttribs[] = {{ CKA_ENCRYPT, &bTrue,     sizeof(bTrue) },
-                                                        { CKA_VERIFY,  &bTrue,     sizeof(bTrue) },
-                                                        { CKA_WRAP,    &bTrue,     sizeof(bTrue) },
-                                                        { CKA_KEY_TYPE,  &rsaKeyType,        sizeof(rsaKeyType)   },
+    CK_ATTRIBUTE                    asymKeyAttribs[] = {{ CKA_KEY_TYPE,  &rsaKeyType,        sizeof(rsaKeyType)   },
                                                         { CKA_CLASS,     &rsaPublicKeyClass, sizeof(rsaPublicKeyClass)  },
                                                         { CKA_LABEL,     rsaPublicKeyLabel,  sizeof(rsaPublicKeyLabel)-1 } };
 
@@ -2465,11 +2516,11 @@ bool rsaExportImportPublicKey(CK_MECHANISM_TYPE     mechanismType,
         }
 
         memcpy(&rsaPublicKeyParams, exportedKey.data(), sizeof(CK_RSA_PUBLIC_KEY_PARAMS));
-        modulus.resize(rsaPublicKeyParams.ulModulusLen);
-        memcpy(modulus.data(), exportedKey.data() + offset, rsaPublicKeyParams.ulModulusLen);
-        offset += rsaPublicKeyParams.ulModulusLen;
         exponent.resize(rsaPublicKeyParams.ulExponentLen);
         memcpy(exponent.data(), exportedKey.data() + offset, rsaPublicKeyParams.ulExponentLen);
+        offset += rsaPublicKeyParams.ulExponentLen;
+        modulus.resize(rsaPublicKeyParams.ulModulusLen);
+        memcpy(modulus.data(), exportedKey.data() + offset, rsaPublicKeyParams.ulModulusLen);
 
         // Importing Public Key...
         mechanism = { CKM_IMPORT_RSA_PUBLIC_KEY, NULL_PTR, 0 };
@@ -2541,6 +2592,217 @@ bool computeSHA256Hash(CK_SESSION_HANDLE        hSession,
     return result;
 }
 
+bool customQuote(CK_MECHANISM_TYPE     mechanismType,
+                 CK_SESSION_HANDLE     hSession,
+                 CK_OBJECT_HANDLE      hKey,
+                 std::string&          errorMessage)
+{
+    if (CKM_EXPORT_EPID_QUOTE_RSA_PUBLIC_KEY == mechanismType)
+    {
+        return customQuoteEpid(mechanismType, hSession, hKey, errorMessage);
+    }
+#ifdef DCAP_SUPPORT
+    else if (CKM_EXPORT_ECDSA_QUOTE_RSA_PUBLIC_KEY == mechanismType)
+    {
+        return customQuoteEcdsa(mechanismType, hSession, hKey, errorMessage);
+    }
+#endif
+    return false;
+}
+
+bool customQuoteEpid(CK_MECHANISM_TYPE     mechanismType,
+                     CK_SESSION_HANDLE     hSession,
+                     CK_OBJECT_HANDLE      hKey,
+                      std::string&         errorMessage)
+{
+    CK_RV                   p11Status          = CKR_GENERAL_ERROR;
+    CK_MECHANISM            mechanism          = { mechanismType, NULL_PTR, 0 };
+    CK_ULONG                quotePublicKeyLen  = 0UL;
+    CK_ULONG                signatureType      = UNLINKABLE_SIGNATURE;
+    bool                    result             = false;
+    std::vector<CK_BYTE>    spid { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33 };
+    std::vector<CK_BYTE>    sigRL;
+    std::vector<CK_BYTE>    quotePublicKey;
+    CK_MECHANISM_PTR        pMechanism((CK_MECHANISM_PTR)&mechanism);
+
+    CK_EPID_QUOTE_RSA_PUBLIC_KEY_PARAMS quoteRSAParams =
+    {
+        spid.data(),
+        spid.size(),
+        sigRL.data(),
+        sigRL.size(),
+        signatureType
+    };
+
+    do
+    {
+        pMechanism->pParameter = &quoteRSAParams;
+        pMechanism->ulParameterLen = sizeof(quoteRSAParams);
+
+        p11Status = p11->C_WrapKey(hSession,
+                                   pMechanism,
+                                   NULL_PTR,
+                                   hKey,
+                                   NULL_PTR,
+                                   &quotePublicKeyLen);
+        if (CKR_OK != p11Status)
+        {
+            errorMessage.append("FAILED : C_WrapKey : customQuote!");
+            break;
+        }
+
+        quotePublicKey.resize(quotePublicKeyLen);
+        p11Status = p11->C_WrapKey(hSession,
+                                   pMechanism,
+                                   NULL_PTR,
+                                   hKey,
+                                   quotePublicKey.data(),
+                                   &quotePublicKeyLen);
+        if (CKR_OK != p11Status)
+        {
+            errorMessage.append("FAILED : C_WrapKey : customQuote!");
+            break;
+        }
+
+        CK_RSA_PUBLIC_KEY_PARAMS* rsaPublicKeyParams = reinterpret_cast<CK_RSA_PUBLIC_KEY_PARAMS*>(quotePublicKey.data());
+        uint32_t pubKeySize = rsaPublicKeyParams->ulModulusLen + rsaPublicKeyParams->ulExponentLen;
+        uint32_t fullPublicKeySize = sizeof(CK_RSA_PUBLIC_KEY_PARAMS) + rsaPublicKeyParams->ulModulusLen + rsaPublicKeyParams->ulExponentLen;
+
+        sgx_quote_t* sgxQuote  = reinterpret_cast<sgx_quote_t*>(quotePublicKey.data() + fullPublicKeySize);
+        uint32_t     quoteSize = quotePublicKeyLen - fullPublicKeySize;
+
+        std::vector<CK_BYTE> quote;
+        quote.resize(quoteSize);
+
+        memcpy(&quote[0], sgxQuote, quoteSize);
+
+        // Extract the public key and verify its hash
+        const uint32_t HASH_LENGTH = 32;
+        std::vector<CK_BYTE> publicKeyHashInQuote(HASH_LENGTH, 0);
+        std::vector<CK_BYTE> publicKeyData(pubKeySize, 0);
+
+        // Fill the hash vector
+        memcpy(publicKeyHashInQuote.data(),
+               sgxQuote->report_body.report_data.d,
+               HASH_LENGTH);
+
+        // Fill the data vector
+        memcpy(publicKeyData.data(),
+               quotePublicKey.data() + sizeof(CK_RSA_PUBLIC_KEY_PARAMS),
+               pubKeySize);
+
+        // Compute hash of publicKeyData..
+        std::vector<CK_BYTE> hashedData;
+
+        std::cout << "Calling EPID Compute hash" << std::endl;
+        computeSHA256Hash(hSession, publicKeyData, hashedData, errorMessage);
+
+        if (publicKeyHashInQuote != hashedData)
+        {
+            errorMessage.append("FAILED : Public key hash and hash in quote mismatch!");
+            break;
+        }
+
+        result = true;
+    } while (false);
+
+    return result;
+}
+
+#ifdef DCAP_SUPPORT
+bool customQuoteEcdsa(CK_MECHANISM_TYPE     mechanismType,
+                      CK_SESSION_HANDLE     hSession,
+                      CK_OBJECT_HANDLE      hKey,
+                      std::string&          errorMessage)
+{
+    CK_RV                   p11Status          = CKR_GENERAL_ERROR;
+    CK_MECHANISM            mechanism          = { mechanismType, NULL_PTR, 0 };
+    CK_ULONG                quotePublicKeyLen  = 0UL;
+    CK_LONG                 qlPolicy           = SGX_QL_PERSISTENT;
+    bool                    result             = false;
+    std::vector<CK_BYTE>    quotePublicKey;
+    CK_MECHANISM_PTR        pMechanism((CK_MECHANISM_PTR)&mechanism);
+
+    CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS quoteRSAParams =
+    {
+        qlPolicy
+    };
+
+    do
+    {
+        pMechanism->pParameter = &quoteRSAParams;
+        pMechanism->ulParameterLen = sizeof(quoteRSAParams);
+
+        p11Status = p11->C_WrapKey(hSession,
+                                   pMechanism,
+                                   NULL_PTR,
+                                   hKey,
+                                   NULL_PTR,
+                                   &quotePublicKeyLen);
+        if (CKR_OK != p11Status)
+        {
+            errorMessage.append("FAILED : C_WrapKey : customQuote!");
+            break;
+        }
+
+        quotePublicKey.resize(quotePublicKeyLen);
+        p11Status = p11->C_WrapKey(hSession,
+                                   pMechanism,
+                                   NULL_PTR,
+                                   hKey,
+                                   quotePublicKey.data(),
+                                   &quotePublicKeyLen);
+        if (CKR_OK != p11Status)
+        {
+            errorMessage.append("FAILED : C_WrapKey : customQuote!");
+            break;
+        }
+
+        CK_RSA_PUBLIC_KEY_PARAMS* rsaPublicKeyParams = reinterpret_cast<CK_RSA_PUBLIC_KEY_PARAMS*>(quotePublicKey.data());
+        uint32_t pubKeySize = rsaPublicKeyParams->ulModulusLen + rsaPublicKeyParams->ulExponentLen;
+        uint32_t fullPublicKeySize = sizeof(CK_RSA_PUBLIC_KEY_PARAMS) + rsaPublicKeyParams->ulModulusLen + rsaPublicKeyParams->ulExponentLen;
+
+        sgx_quote_t* sgxQuote  = reinterpret_cast<sgx_quote_t*>(quotePublicKey.data() + fullPublicKeySize);
+        uint32_t     quoteSize = quotePublicKeyLen - fullPublicKeySize;
+
+        std::vector<CK_BYTE> quote;
+        quote.resize(quoteSize);
+
+        memcpy(&quote[0], sgxQuote, quoteSize);
+
+        // Extract the public key and verify its hash
+        const uint32_t HASH_LENGTH = 32;
+        std::vector<CK_BYTE> publicKeyHashInQuote(HASH_LENGTH, 0);
+        std::vector<CK_BYTE> publicKeyData(pubKeySize, 0);
+
+        // Fill the hash vector
+        memcpy(publicKeyHashInQuote.data(),
+               sgxQuote->report_body.report_data.d,
+               HASH_LENGTH);
+
+        // Fill the data vector
+        memcpy(publicKeyData.data(),
+               quotePublicKey.data() + sizeof(CK_RSA_PUBLIC_KEY_PARAMS),
+               pubKeySize);
+
+        // Compute hash of publicKeyData..
+        std::vector<CK_BYTE> hashedData;
+
+        computeSHA256Hash(hSession, publicKeyData, hashedData, errorMessage);
+
+        if (publicKeyHashInQuote != hashedData)
+        {
+            errorMessage.append("FAILED : Public key hash and hash in quote mismatch!");
+            break;
+        }
+
+        result = true;
+    } while (false);
+
+    return result;
+}
+#endif
+
 bool findObjects(CK_SESSION_HANDLE hSession, std::string& errorMessage)
 {
     CK_RV            p11Status        = CKR_FUNCTION_FAILED;
@@ -2584,3 +2846,4 @@ bool findObjects(CK_SESSION_HANDLE hSession, std::string& errorMessage)
 
     return result;
 }
+

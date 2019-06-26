@@ -29,213 +29,131 @@
  *
  */
 
-#include <sgx_error.h>
-
 #include "HashProvider.h"
-#include "EnclaveHelpers.h"
-#include "p11Enclave_u.h"
 
 namespace P11Crypto
 {
-    std::recursive_mutex HashProvider::mProviderMutex;
-
-    //---------------------------------------------------------------------------------------------
-    std::shared_ptr<HashProvider> HashProvider::getHashProvider()
+    namespace HashProvider
     {
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        std::shared_ptr<HashProvider> hashProvider = std::make_shared<HashProvider>();
-
-        ulock.unlock();
-        return hashProvider;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV HashProvider::hashInit(uint32_t*          hashHandle,
-                                 const uint32_t&    keyHandleForHmac,
-                                 const HashMode&    hashMode,
-                                 const bool&        hmac)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
+        //---------------------------------------------------------------------------------------------
+        CK_RV hashInit(uint32_t*       hashHandle,
+                       const uint32_t& keyHandleForHmac,
+                       const HashMode& hashMode,
+                       const bool&     hmac)
         {
-            sgxStatus = generateId(enclaveHelpers.getSgxEnclaveId(),
-                                   reinterpret_cast<int32_t*>(&enclaveStatus),
-                                   hashHandle);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            EnclaveHelpers enclaveHelpers;
 
-            if (CKR_OK != rv)
+            do
             {
-                break;
-            }
+                sgxStatus = generateId(enclaveHelpers.getSgxEnclaveId(),
+                                       reinterpret_cast<int32_t*>(&enclaveStatus),
+                                       hashHandle);
 
-            sgxStatus = digestInit(enclaveHelpers.getSgxEnclaveId(),
-                                   reinterpret_cast<int32_t*>(&enclaveStatus),
-                                   *hashHandle,
-                                   keyHandleForHmac,
-                                   static_cast<uint8_t>(hashMode),
-                                   static_cast<uint8_t>(hmac));
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
 
-            if (CKR_OK != rv)
+                if (CKR_OK != rv)
+                {
+                    break;
+                }
+
+                sgxStatus = digestInit(enclaveHelpers.getSgxEnclaveId(),
+                                       reinterpret_cast<int32_t*>(&enclaveStatus),
+                                       *hashHandle,
+                                       keyHandleForHmac,
+                                       static_cast<uint8_t>(hashMode),
+                                       static_cast<uint8_t>(hmac));
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+                if (CKR_OK != rv)
+                {
+                    // Clean up the hash handle in enclave cache
+                    sgxStatus = destroyHashState(enclaveHelpers.getSgxEnclaveId(),
+                                                 reinterpret_cast<int32_t*>(&enclaveStatus),
+                                                 *hashHandle);
+                }
+
+            } while (false);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV hashUpdate(const uint32_t& hashHandle,
+                         const uint8_t*  sourceBuffer,
+                         const uint32_t& sourceBufferLen)
+        {
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            EnclaveHelpers enclaveHelpers;
+
+            do
             {
-                // Clean up the hash handle in enclave cache
+                sgxStatus = digestUpdate(enclaveHelpers.getSgxEnclaveId(),
+                                         reinterpret_cast<int32_t*>(&enclaveStatus),
+                                         hashHandle,
+                                         sourceBuffer, sourceBufferLen);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+            } while (false);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV hashFinal(const uint32_t& hashHandle,
+                        uint8_t*        destBuffer,
+                        const uint32_t& destBufferLen)
+        {
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            EnclaveHelpers enclaveHelpers;
+
+            do
+            {
+                sgxStatus = digestFinal(enclaveHelpers.getSgxEnclaveId(),
+                                        reinterpret_cast<int32_t*>(&enclaveStatus),
+                                        hashHandle,
+                                        destBuffer, destBufferLen);
+
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
+
+            } while (false);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV destroyHash(const uint32_t& hashHandle)
+        {
+            CK_RV          rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            EnclaveHelpers enclaveHelpers;
+
+            do
+            {
                 sgxStatus = destroyHashState(enclaveHelpers.getSgxEnclaveId(),
                                              reinterpret_cast<int32_t*>(&enclaveStatus),
-                                             *hashHandle);
-            }
+                                             hashHandle);
 
-        } while (false);
+                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
 
-        ulock.unlock();
-        return rv;
-    }
+                if (CKR_OK != rv)
+                {
+                    break;
+                }
 
-    //---------------------------------------------------------------------------------------------
-    CK_RV HashProvider::hashUpdate(const uint32_t&  hashHandle,
-                                   const uint8_t*   sourceBuffer,
-                                   const uint32_t&  sourceBufferLen)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
+                rv = CKR_OK;
+            } while (false);
 
-        do
-        {
-            sgxStatus  = digestUpdate(enclaveHelpers.getSgxEnclaveId(),
-                                      reinterpret_cast<int32_t*>(&enclaveStatus),
-                                      hashHandle,
-                                      sourceBuffer,
-                                      sourceBufferLen);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-     //---------------------------------------------------------------------------------------------
-    CK_RV HashProvider::hashFinal(const uint32_t&   hashHandle,
-                                  uint8_t*          destBuffer,
-                                  const uint32_t&   destBufferLen)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            sgxStatus  = digestFinal(enclaveHelpers.getSgxEnclaveId(),
-                                      reinterpret_cast<int32_t*>(&enclaveStatus),
-                                      hashHandle,
-                                      destBuffer,
-                                      destBufferLen);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-        } while (false);
-
-        ulock.unlock();
-        return rv;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    CK_RV HashProvider::destroyHash(const uint32_t&                   hashHandle,
-                                    std::shared_ptr<HashHandleCache>  hashHandleCache)
-    {
-        CK_RV               rv              = CKR_FUNCTION_FAILED;
-        sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        EnclaveHelpers      enclaveHelpers;
-        std::unique_lock<decltype(mProviderMutex)> ulock(mProviderMutex, std::defer_lock);
-        ulock.lock();
-
-        do
-        {
-            sgxStatus = destroyHashState(enclaveHelpers.getSgxEnclaveId(),
-                                         reinterpret_cast<int32_t*>(&enclaveStatus),
-                                         hashHandle);
-            if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-            {
-                rv = CKR_POWER_STATE_INVALID;
-            }
-            else if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                rv = CKR_GENERAL_ERROR;
-            }
-            else
-            {
-                rv = enclaveHelpers.enclaveStatusToPkcsStatus(enclaveStatus);
-            }
-
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-            rv = CKR_OK;
-        } while (false);
-
-        hashHandleCache->remove(hashHandle);
-
-        ulock.unlock();
-        return rv;
+            return rv;
+        }
     }
 }

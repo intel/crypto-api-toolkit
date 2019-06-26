@@ -41,11 +41,11 @@
 namespace CryptoSgx
 {
     //---------------------------------------------------------------------------------------------
-    void SymmetricCrypto::addEVPCtxState(const uint32_t&         keyId,
-                                         EVPContextHandle&       evpContext,
-                                         const BlockCipherMode&  cipherMode,
-                                         const uint32_t&         tagBits,
-                                         const uint32_t&         padding)
+    void SymmetricCrypto::addEVPCtxState(const uint32_t&        keyId,
+                                         EVPContextHandle&      evpContext,
+                                         const BlockCipherMode& cipherMode,
+                                         const uint32_t&        tagBits,
+                                         const uint32_t&        padding)
     {
         EVPCtxState evpCtxState;
         evpCtxState.evpCtx                  = &evpContext;
@@ -72,6 +72,11 @@ namespace CryptoSgx
         if (iv && ivSize)
         {
             ippCtxState.cryptParams.iv.allocate(ivSize);
+            if (!ippCtxState.cryptParams.iv.isValid())
+            {
+                return;
+            }
+
             ippCtxState.cryptParams.iv.fromData(iv, ivSize);
         }
 
@@ -80,55 +85,56 @@ namespace CryptoSgx
 
     //---------------------------------------------------------------------------------------------
     bool SymmetricCrypto::getEVPCtxState(const uint32_t&    keyId,
-                                         EVPCtxState&       evpContext)
+                                         EVPCtxState*       evpContext)
     {
         const bool result = mEVPCtxStateCache.find(keyId);
-        if (result)
+        if (result && evpContext)
         {
-            evpContext = mEVPCtxStateCache.get(keyId);
+            *evpContext = mEVPCtxStateCache.get(keyId);
         }
+
         return result;
     }
 
     //---------------------------------------------------------------------------------------------
     bool SymmetricCrypto::getIppCtxState(const uint32_t&    keyId,
-                                         IppCtxState&       ippCtxContext)
+                                         IppCtxState*       ippCtxContext)
     {
         const bool result = mIppCtxStateCache.find(keyId);
-        if (result)
+        if (result && ippCtxContext)
         {
-            ippCtxContext = mIppCtxStateCache.get(keyId);
+            *ippCtxContext = mIppCtxStateCache.get(keyId);
         }
         return result;
     }
 
     //---------------------------------------------------------------------------------------------
     auto isSupportedAesMode = [](const BlockCipherMode& cipherMode) -> bool
-    {
-        return (BlockCipherMode::ctr == cipherMode) ||
-               (BlockCipherMode::gcm == cipherMode) ||
-               (BlockCipherMode::cbc == cipherMode);
-    };
+                                {
+                                    return (BlockCipherMode::ctr == cipherMode) ||
+                                           (BlockCipherMode::gcm == cipherMode) ||
+                                           (BlockCipherMode::cbc == cipherMode);
+                                };
 
     //---------------------------------------------------------------------------------------------
     auto isSupportedIvSize = [](const uint32_t& ivSize) -> bool
-    {
-        return (supportedIvSize == ivSize);
-    };
+                               {
+                                   return (supportedIvSize == ivSize);
+                               };
 
     //---------------------------------------------------------------------------------------------
     auto isSupportedCounterBitsSize = [](const int& counterBits) -> bool
-    {
-        return (counterBits >= minCounterBitsSupported) &&
-               (counterBits <= maxCounterBitsSupported);
-    };
+                                        {
+                                            return (counterBits >= minCounterBitsSupported) &&
+                                                   (counterBits <= maxCounterBitsSupported);
+                                        };
 
     //---------------------------------------------------------------------------------------------
     auto isSupportedTagSize = [](const uint32_t& tagSize) -> bool
-    {
-        return (tagSize >= minTagLengthSupported) &&
-               (tagSize <= maxTagLengthSupported);
-    };
+                                {
+                                    return (tagSize >= minTagLengthSupported) &&
+                                           (tagSize <= maxTagLengthSupported);
+                                };
 
     //---------------------------------------------------------------------------------------------
     void freeEvpContext(EVP_CIPHER_CTX* evpContext)
@@ -206,7 +212,7 @@ namespace CryptoSgx
                                            const uint8_t*          iv,
                                            const uint32_t&         ivSize,
                                            const uint8_t*          aad,
-                                           uint32_t                aadSize,
+                                           const uint32_t&         aadSize,
                                            const uint32_t&         padding,
                                            const uint32_t&         tagBits,
                                            const int&              counterBits)
@@ -260,10 +266,10 @@ namespace CryptoSgx
                 }
             }
 
-            result = getSymmetricKey(keyId, symKey);
+            result = getSymmetricKey(keyId, &symKey);
             if (result)
             {
-                fillCryptInitParams(cryptParams,
+                fillCryptInitParams(&cryptParams,
                                     cipherMode,
                                     symKey.key,
                                     iv,
@@ -310,7 +316,7 @@ namespace CryptoSgx
 
         do
         {
-            result = getEVPCtxState(keyId, evpCtxState);
+            result = getEVPCtxState(keyId, &evpCtxState);
             if (!result || !destBufferWritten)
             {
                 status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
@@ -350,9 +356,9 @@ namespace CryptoSgx
                 break;
             }
 
-            result = evpEncrypt.encryptUpdate(evpCtxState,
+            result = evpEncrypt.encryptUpdate(&evpCtxState,
                                               destBuffer,
-                                              bytesEncrypted,
+                                              &bytesEncrypted,
                                               sourceBuffer,
                                               sourceBufferLen);
             if (!result)
@@ -368,7 +374,7 @@ namespace CryptoSgx
                 int offset      = bytesEncrypted;
                 bytesEncrypted  = 0;
 
-                result = evpEncrypt.encryptFinal(evpCtxState, destBuffer + offset, bytesEncrypted);
+                result = evpEncrypt.encryptFinal(&evpCtxState, destBuffer + offset, &bytesEncrypted);
                 if (!result)
                 {
                     status              = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
@@ -396,7 +402,7 @@ namespace CryptoSgx
                                                      uint8_t*            destBuffer,
                                                      const uint32_t&     destBufferLen,
                                                      uint32_t*           destBufferWritten,
-                                                     IppCtxState&        ippCtxState,
+                                                     IppCtxState*        ippCtxState,
                                                      bool                doFullEncryptWithoutFinal)
     {
         SgxCryptStatus  status          = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
@@ -419,7 +425,7 @@ namespace CryptoSgx
                 break;
             }
 
-            result = ippEncrypt.encryptUpdate(ippCtxState, destBuffer, bytesEncrypted, sourceBuffer, sourceBufferLen);
+            result = ippEncrypt.encryptUpdate(ippCtxState, destBuffer, &bytesEncrypted, sourceBuffer, sourceBufferLen);
             if (!result)
             {
                 status              = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
@@ -437,7 +443,7 @@ namespace CryptoSgx
             }
             else
             {
-                mIppCtxStateCache.add(keyId, ippCtxState);
+                mIppCtxStateCache.add(keyId, *ippCtxState);
             }
 
         } while(false);
@@ -461,7 +467,7 @@ namespace CryptoSgx
 
         do
         {
-            result = getIppCtxState(keyId, ippCtxState);
+            result = getIppCtxState(keyId, &ippCtxState);
             if (result)
             {
                 ctrMode = true;
@@ -475,7 +481,7 @@ namespace CryptoSgx
                                           destBuffer,
                                           destBufferLen,
                                           destBufferWritten,
-                                          ippCtxState,
+                                          &ippCtxState,
                                           doFullEncryptWithoutFinal);
             }
             else
@@ -498,7 +504,7 @@ namespace CryptoSgx
     SgxCryptStatus SymmetricCrypto::encryptFinalIpp(const uint32_t& keyId,
                                                     uint8_t*        destBuffer,
                                                     uint32_t*       destBufferWritten,
-                                                    IppCtxState&    ippCtxState)
+                                                    IppCtxState*    ippCtxState)
     {
         SgxCryptStatus  status  = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
         IppEncrypt      ippEncrypt;
@@ -532,7 +538,7 @@ namespace CryptoSgx
 
         do
         {
-            result = getEVPCtxState(keyId, evpCtxState);
+            result = getEVPCtxState(keyId, &evpCtxState);
             if (!result || !destBufferWritten)
             {
                 status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
@@ -549,7 +555,7 @@ namespace CryptoSgx
                 }
             }
 
-            result = evpEncrypt.encryptFinal(evpCtxState, destBuffer, bytesEncrypted);
+            result = evpEncrypt.encryptFinal(&evpCtxState, destBuffer, &bytesEncrypted);
 
             if (!result)
             {
@@ -580,7 +586,7 @@ namespace CryptoSgx
 
         do
         {
-            result = getIppCtxState(keyId, ippCtxState);
+            result = getIppCtxState(keyId, &ippCtxState);
             if (result)
             {
                 ctrMode = true;
@@ -591,7 +597,7 @@ namespace CryptoSgx
                 status = encryptFinalIpp(keyId,
                                          destBuffer,
                                          destBufferWritten,
-                                         ippCtxState);
+                                         &ippCtxState);
             }
             else
             {
@@ -629,14 +635,14 @@ namespace CryptoSgx
 
             SymmetricKey symKey{};
 
-            result = allocateSymmetricKey(symKey, keyLength);
+            result = allocateSymmetricKey(&symKey, keyLength);
             if (!result)
             {
                 status = SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY;
                 break;
             }
 
-            result = populateSymmetricKey(symKey);
+            result = populateSymmetricKey(&symKey);
             if (!result)
             {
                 status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
@@ -683,19 +689,33 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
-    bool SymmetricCrypto::allocateSymmetricKey(SymmetricKey&           symKeyStruct,
+    bool SymmetricCrypto::allocateSymmetricKey(SymmetricKey*           symKeyStruct,
                                                const SymmetricKeySize& keyLength)
     {
-        symKeyStruct.key.allocate(static_cast<size_t>(keyLength));
-        bool result = (keyLength == static_cast<SymmetricKeySize>(symKeyStruct.key.size()));
-        return result;
+        if (!symKeyStruct)
+        {
+            return false;
+        }
+
+        symKeyStruct->key.allocate(static_cast<size_t>(keyLength));
+        if (!symKeyStruct->key.isValid())
+        {
+            return false;
+        }
+
+        return (keyLength == static_cast<SymmetricKeySize>(symKeyStruct->key.size()));
     }
 
     //---------------------------------------------------------------------------------------------
-    bool SymmetricCrypto::populateSymmetricKey(SymmetricKey& symKey)
+    bool SymmetricCrypto::populateSymmetricKey(SymmetricKey* symKey)
     {
-       const sgx_status_t keyPopulated = sgx_read_rand(symKey.key.get(), symKey.key.size());
-       return (sgx_status_t::SGX_SUCCESS == keyPopulated);
+        if (!symKey)
+        {
+            return false;
+        }
+ 
+        const sgx_status_t keyPopulated = sgx_read_rand(symKey->key.get(), symKey->key.size());
+        return (sgx_status_t::SGX_SUCCESS == keyPopulated);
     }
 
     //---------------------------------------------------------------------------------------------
@@ -734,7 +754,7 @@ namespace CryptoSgx
             }
 
             SymmetricKey symKey{};
-            result = getSymmetricKey(keyId, symKey);
+            result = getSymmetricKey(keyId, &symKey);
 
             if (!result || !symKey.key.get())
             {
@@ -742,7 +762,7 @@ namespace CryptoSgx
                 break;
             }
 
-            result = exportPlatformBoundKey(symKey, destBuffer, destBufferLen, destBufferWritten, status);
+            result = exportPlatformBoundKey(symKey, destBuffer, destBufferLen, destBufferWritten, &status);
             if (result)
             {
                 symKey.isPlatformBound = true;
@@ -760,13 +780,15 @@ namespace CryptoSgx
 
     //---------------------------------------------------------------------------------------------
     bool SymmetricCrypto::getSymmetricKey(const uint32_t& keyId,
-                                          SymmetricKey&   key)
+                                          SymmetricKey*   key)
     {
         const bool result = mSymmetricKeyCache.find(keyId);
-        if (result)
+
+        if (result && key)
         {
-            key = mSymmetricKeyCache.get(keyId);
+            *key = mSymmetricKeyCache.get(keyId);
         }
+
         return result;
     }
 
@@ -777,21 +799,26 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
-    bool SymmetricCrypto::exportPlatformBoundKey(SymmetricKey&      symKey,
-                                                 uint8_t*           destBuffer,
-                                                 const uint32_t&    destBufferLen,
-                                                 uint32_t*          destBufferWritten,
-                                                 SgxCryptStatus&    status)
+    bool SymmetricCrypto::exportPlatformBoundKey(const SymmetricKey&    symKey,
+                                                 uint8_t*               destBuffer,
+                                                 const uint32_t&        destBufferLen,
+                                                 uint32_t*              destBufferWritten,
+                                                 SgxCryptStatus*        status)
     {
         bool        result              = false;
         uint32_t    pbindInputDataSize  = 0;
         uint32_t    sealDataSize        = 0;
 
+        if (!status)
+        {
+            return false;
+        }        
+
         do
         {
             if (!symKey.key.get())
             {
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
+                *status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
                 break;
             }
 
@@ -800,7 +827,7 @@ namespace CryptoSgx
 
             if (UINT32_MAX == sealDataSize)
             {
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
+                *status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
                 break;
             }
             else
@@ -814,15 +841,15 @@ namespace CryptoSgx
 
                 if (destBufferLen < sealDataSize)
                 {
-                    status = SgxCryptStatus::SGX_CRYPT_STATUS_BUFFER_TOO_SHORT;
+                    *status = SgxCryptStatus::SGX_CRYPT_STATUS_BUFFER_TOO_SHORT;
                     break;
                 }
 
-                std::unique_ptr<uint8_t[]> dataToBePlatformBound(new uint8_t[pbindInputDataSize]);
+                std::unique_ptr<uint8_t[]> dataToBePlatformBound(new (std::nothrow) uint8_t[pbindInputDataSize]);
                 if (!dataToBePlatformBound.get())
                 {
                     result = false;
-                    status = SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY;
+                    *status = SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY;
                     break;
                 }
 
@@ -848,7 +875,7 @@ namespace CryptoSgx
                 if (!result)
                 {
                     *destBufferWritten = 0;
-                    status = SgxCryptStatus::SGX_CRYPT_STATUS_SEALED_DATA_FAILED;
+                    *status = SgxCryptStatus::SGX_CRYPT_STATUS_SEALED_DATA_FAILED;
                     break;
                 }
             }
@@ -887,7 +914,7 @@ namespace CryptoSgx
             }
 
             SymmetricKey symKey{};
-            result = allocateSymmetricKey(symKey, static_cast<SymmetricKeySize>(sourceBufferLen));
+            result = allocateSymmetricKey(&symKey, static_cast<SymmetricKeySize>(sourceBufferLen));
             if (!result)
             {
                 status = SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY;
@@ -982,9 +1009,9 @@ namespace CryptoSgx
             }
 
             if (decryptedDataSize &&
-                (true == (result = allocateSymmetricKey(symKey, static_cast<SymmetricKeySize>(keySize)))))
+                (true == (result = allocateSymmetricKey(&symKey, static_cast<SymmetricKeySize>(keySize)))))
             {
-                std::unique_ptr<uint8_t[]> tempDest(new uint8_t[decryptedDataSize], std::default_delete<uint8_t[]>());
+                std::unique_ptr<uint8_t[]> tempDest(new (std::nothrow) uint8_t[decryptedDataSize], std::default_delete<uint8_t[]>());
 
                 if (!tempDest.get())
                 {
@@ -1010,6 +1037,12 @@ namespace CryptoSgx
                 bool isUsedForWrapping = static_cast<bool>(*(tempDest.get() + keySize));
 
                 symKey.key.allocate(keySize);
+                if (!symKey.key.isValid())
+                {
+                    result = false;
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY;
+                    break;
+                }
                 symKey.key.fromData(tempDest.get(), keySize);
                 symKey.isPlatformBound      = true;
                 symKey.isUsedForWrapping    = isUsedForWrapping;
@@ -1036,47 +1069,62 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
-    void SymmetricCrypto::fillCryptInitParams(CryptParams&           cryptParams,
-                                              const BlockCipherMode& cipherMode,
-                                              const ByteBuffer&      key,
-                                              const uint8_t*         iv,
-                                              const uint32_t&        ivSize,
-                                              const uint8_t*         aad,
-                                              uint32_t               aadSize,
-                                              uint32_t               tagBits,
-                                              int                    counterBits,
-                                              const uint32_t&        padding)
+    void SymmetricCrypto::fillCryptInitParams(CryptParams*              cryptParams,
+                                              const BlockCipherMode&    cipherMode,
+                                              const ByteBuffer&         key,
+                                              const uint8_t*            iv,
+                                              const uint32_t&           ivSize,
+                                              const uint8_t*            aad,
+                                              const uint32_t&           aadSize,
+                                              const uint32_t&           tagBits,
+                                              const int&                counterBits,
+                                              const uint32_t&           padding)
     {
-        cryptParams.cipherMode = cipherMode;
+
+        if (!cryptParams)
+        {
+            return;
+        }
+
+        cryptParams->cipherMode = cipherMode;
 
         if (key.get())
         {
-            cryptParams.key.allocate(key.size());
-            cryptParams.key.fromData(key.get(), key.size());
+            cryptParams->key.allocate(key.size());
+            if (cryptParams->key.isValid())
+            {
+                cryptParams->key.fromData(key.get(), key.size());
+            }
         }
 
         if (iv && ivSize)
         {
-            cryptParams.iv.allocate(ivSize);
-            cryptParams.iv.fromData(iv, ivSize);
+            cryptParams->iv.allocate(ivSize);
+            if (cryptParams->iv.isValid())
+            {
+                cryptParams->iv.fromData(iv, ivSize);
+            }
         }
 
         if (aad && aadSize)
         {
-            cryptParams.aad.allocate(aadSize);
-            cryptParams.aad.fromData(aad, aadSize);
+            cryptParams->aad.allocate(aadSize);
+            if (cryptParams->aad.isValid())
+            {
+                cryptParams->aad.fromData(aad, aadSize);
+            }
         }
 
-        cryptParams.padding = padding;
+        cryptParams->padding = padding;
 
         if (BlockCipherMode::gcm == cipherMode)
         {
-            cryptParams.tagBits = tagBits;
+            cryptParams->tagBits = tagBits;
         }
 
         if (BlockCipherMode::ctr == cipherMode)
         {
-            cryptParams.counterBits = counterBits;
+            cryptParams->counterBits = counterBits;
         }
     }
 
@@ -1150,7 +1198,7 @@ namespace CryptoSgx
                                            const uint8_t*          iv,
                                            const uint32_t&         ivSize,
                                            const uint8_t*          aad,
-                                           uint32_t                aadSize,
+                                           const uint32_t&         aadSize,
                                            const uint32_t&         padding,
                                            const uint32_t&         tagBits,
                                            const int&              counterBits)
@@ -1204,10 +1252,10 @@ namespace CryptoSgx
                 }
             }
 
-            result = getSymmetricKey(keyId, symKey);
+            result = getSymmetricKey(keyId, &symKey);
             if (result)
             {
-                fillCryptInitParams(cryptParams,
+                fillCryptInitParams(&cryptParams,
                                     cipherMode,
                                     symKey.key,
                                     iv,
@@ -1232,7 +1280,6 @@ namespace CryptoSgx
             {
                 status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE;
             }
-
         } while (false);
 
         return static_cast<SgxStatus>(status);
@@ -1255,7 +1302,7 @@ namespace CryptoSgx
 
         do
         {
-            result = getEVPCtxState(keyId, evpCtxState);
+            result = getEVPCtxState(keyId, &evpCtxState);
             if (!result || !destBufferWritten)
             {
                 status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
@@ -1330,7 +1377,7 @@ namespace CryptoSgx
                     break;
                 }
 
-                result = evpDecrypt.decryptUpdate(evpCtxState, destBuffer, bytesDecrypted, sourceBuffer, sourceBufferLen);
+                result = evpDecrypt.decryptUpdate(&evpCtxState, destBuffer, &bytesDecrypted, sourceBuffer, sourceBufferLen);
 
                 if (!result)
                 {
@@ -1346,7 +1393,7 @@ namespace CryptoSgx
                 int offset = bytesDecrypted;
                 bytesDecrypted = 0;
 
-                result = evpDecrypt.decryptFinal(evpCtxState, destBuffer + offset, bytesDecrypted);
+                result = evpDecrypt.decryptFinal(&evpCtxState, destBuffer + offset, &bytesDecrypted);
                 if (!result)
                 {
                     status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
@@ -1362,21 +1409,20 @@ namespace CryptoSgx
             {
                 mEVPCtxStateCache.add(keyId, evpCtxState);
             }
-
         } while(false);
 
         return status;
     }
 
     //--------------------------------------------------------------------------------------------
-    SgxCryptStatus SymmetricCrypto::decryptUpdateIpp(const uint32_t&     keyId,
-                                                     const uint8_t*      sourceBuffer,
-                                                     const uint32_t&     sourceBufferLen,
-                                                     uint8_t*            destBuffer,
-                                                     const uint32_t&     destBufferLen,
-                                                     uint32_t*           destBufferWritten,
-                                                     IppCtxState&        ippCtxState,
-                                                     bool                doFullDecryptWithoutFinal)
+    SgxCryptStatus SymmetricCrypto::decryptUpdateIpp(const uint32_t&    keyId,
+                                                     const uint8_t*     sourceBuffer,
+                                                     const uint32_t&    sourceBufferLen,
+                                                     uint8_t*           destBuffer,
+                                                     const uint32_t&    destBufferLen,
+                                                     uint32_t*          destBufferWritten,
+                                                     IppCtxState*       ippCtxState,
+                                                     bool               doFullDecryptWithoutFinal)
     {
         SgxCryptStatus  status          = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
         bool            result          = false;
@@ -1385,7 +1431,7 @@ namespace CryptoSgx
 
         do
         {
-            if (!destBufferWritten)
+            if (!destBufferWritten || !ippCtxState)
             {
                 status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
                 break;
@@ -1398,13 +1444,14 @@ namespace CryptoSgx
                 break;
             }
 
-            result = ippDecrypt.decryptUpdate(ippCtxState, destBuffer, bytesDecrypted, sourceBuffer, sourceBufferLen);
+            result = ippDecrypt.decryptUpdate(ippCtxState, destBuffer, &bytesDecrypted, sourceBuffer, sourceBufferLen);
             if (!result)
             {
                 status             = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
                 *destBufferWritten = 0;
                 break;
             }
+
             *destBufferWritten = bytesDecrypted;
 
             if (doFullDecryptWithoutFinal)
@@ -1416,7 +1463,7 @@ namespace CryptoSgx
             }
             else
             {
-                mIppCtxStateCache.add(keyId, ippCtxState);
+                mIppCtxStateCache.add(keyId, *ippCtxState);
             }
 
         } while(false);
@@ -1440,7 +1487,7 @@ namespace CryptoSgx
 
         do
         {
-            result = getIppCtxState(keyId, ippCtxState);
+            result = getIppCtxState(keyId, &ippCtxState);
             if (result)
             {
                 ctrMode = true;
@@ -1454,7 +1501,7 @@ namespace CryptoSgx
                                           destBuffer,
                                           destBufferLen,
                                           destBufferWritten,
-                                          ippCtxState,
+                                          &ippCtxState,
                                           doFullDecryptWithoutFinal);
             }
             else
@@ -1477,7 +1524,7 @@ namespace CryptoSgx
     SgxCryptStatus SymmetricCrypto::decryptFinalIpp(const uint32_t& keyId,
                                                     uint8_t*        destBuffer,
                                                     uint32_t*       destBufferWritten,
-                                                    IppCtxState&    ippCtxState)
+                                                    IppCtxState*    ippCtxState)
     {
         SgxCryptStatus  status  = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
         IppDecrypt      ippDecrypt;
@@ -1513,7 +1560,7 @@ namespace CryptoSgx
 
         do
         {
-            result = getEVPCtxState(keyId, evpCtxState);
+            result = getEVPCtxState(keyId, &evpCtxState);
             if (!result || !destBufferWritten)
             {
                 status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
@@ -1528,9 +1575,9 @@ namespace CryptoSgx
                 uint32_t          tagBytes       = evpCtxState.cryptParams.tagBits >> 3;
                 uint32_t          cipherTextSize = evpCtxState.cryptParams.cipherText.size() - tagBytes;
 
-                result = evpDecrypt.decryptUpdate(evpCtxState,
+                result = evpDecrypt.decryptUpdate(&evpCtxState,
                                                   destBuffer,
-                                                  bytesDecrypted,
+                                                  &bytesDecrypted,
                                                   evpCtxState.cryptParams.cipherText.data(),
                                                   cipherTextSize);
                 if (!result)
@@ -1544,9 +1591,9 @@ namespace CryptoSgx
                 bytesDecrypted = 0;
             }
 
-            result = evpDecrypt.decryptFinal(evpCtxState,
+            result = evpDecrypt.decryptFinal(&evpCtxState,
                                              destBuffer + *destBufferWritten,
-                                             bytesDecrypted);
+                                             &bytesDecrypted);
             if (!result)
             {
                 memset_s(destBuffer, destBufferLen, 0, destBufferLen);
@@ -1565,9 +1612,9 @@ namespace CryptoSgx
     }
 
     //--------------------------------------------------------------------------------------------
-    SgxStatus SymmetricCrypto::decryptFinal(const uint32_t&    keyId,
-                                            uint8_t*           destBuffer,
-                                            uint32_t*          destBufferWritten)
+    SgxStatus SymmetricCrypto::decryptFinal(const uint32_t& keyId,
+                                            uint8_t*        destBuffer,
+                                            uint32_t*       destBufferWritten)
     {
         SgxCryptStatus  status        = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
         bool            result        = false;
@@ -1576,7 +1623,7 @@ namespace CryptoSgx
 
         do
         {
-            result = getIppCtxState(keyId, ippCtxState);
+            result = getIppCtxState(keyId, &ippCtxState);
             if (result)
             {
                 ctrMode = true;
@@ -1587,7 +1634,7 @@ namespace CryptoSgx
                 status = decryptFinalIpp(keyId,
                                          destBuffer,
                                          destBufferWritten,
-                                         ippCtxState);
+                                         &ippCtxState);
             }
             else
             {

@@ -32,8 +32,21 @@
 #ifndef TOKEN_H
 #define TOKEN_H
 
+#include "p11Sgx.h"
 #include "p11Defines.h"
-#include "CryptoEnclaveDefs.h"
+#include "TokenUtils.h"
+#include "EnclaveUtils.h"
+#include "Constants.h"
+#include "SlotUtils.h"
+#include "FileUtils.h"
+#include "SessionCache.h"
+
+#include <sys/stat.h>
+#include <string.h>
+#include <sstream>
+#include <string>
+#include <vector>
+
 
 namespace P11Crypto
 {
@@ -73,72 +86,31 @@ namespace P11Crypto
         CK_RV initToken(CK_UTF8CHAR_PTR pin, const CK_ULONG& pinLength, CK_UTF8CHAR_PTR label);
 
         /**
-        * Adds the session count in slot/token file.
-        * @return CK_RV      CKR_OK if success, error code otherwise.
-        */
-        CK_RV addSession();
-
-        /**
-        * Adds the session count in slot/token file.
-        * @return CK_RV      CKR_OK if success, error code otherwise.
-        */
-        CK_RV removeSession();
-
-        /**
-        * Logs in the SO into token.
-        * @param  pin            Pointer to the SO pin.
-        * @param  pinLength      The length of SO pin.
-        * @return CK_RV          CKR_OK if SO is logged into the token, error code otherwise.
-        */
-        CK_RV loginSO(CK_UTF8CHAR_PTR pin, const CK_ULONG& pinLength);
-
-        /**
-        * Logs in the user into token.
-        * @param  pin            Pointer to the user pin.
-        * @param  pinLength      The length of user pin.
-        * @return CK_RV          CKR_OK if user is logged into the token, error code otherwise.
-        */
-        CK_RV loginUser(CK_UTF8CHAR_PTR pin, const CK_ULONG& pinLength);
-
-        /**
         * Initializes a user pin.
         * @param  pin            Pointer to the user pin.
         * @param  pinLength      The length of user pin.
         * @return CK_RV          CKR_OK if user pin is initialized, error code otherwise.
         */
-        CK_RV initUserPin(CK_UTF8CHAR_PTR pin, const CK_ULONG& pinLength);
+        CK_RV initPin(CK_UTF8CHAR_PTR pin, const CK_ULONG& pinLength);
 
         /**
-        * Sets a new SO pin by validating the old SO pin.
+        * Sets a new pin for SO or User by validating for the old pin.
         * @param  oldPin            Pointer to the old SO pin.
         * @param  oldPinLength      The length of old SO pin.
         * @param  newPin            Pointer to the new SO pin.
         * @param  newPinLength      The length of new SO pin.
+        * @param  userType          A CK_USER_TYPE representing SO or User
         * @return CK_RV             CKR_OK if new SO pin is set, error code otherwise.
         */
-        CK_RV setSOPin(CK_UTF8CHAR_PTR oldPin,
-                       const CK_ULONG& oldPinLen,
-                       CK_UTF8CHAR_PTR newPin,
-                       const CK_ULONG& newPinLen);
-
-        /**
-        * Sets a new user pin by validating the old user pin.
-        * @param  oldPin            Pointer to the old user pin.
-        * @param  oldPinLength      The length of old user pin.
-        * @param  newPin            Pointer to the new user pin.
-        * @param  newPinLength      The length of new user pin.
-        * @return CK_RV             CKR_OK if new user pin is set, error code otherwise.
-        */
-        CK_RV setUserPin(CK_UTF8CHAR_PTR oldPin,
-                         const CK_ULONG& oldPinLen,
-                         CK_UTF8CHAR_PTR newPin,
-                         const CK_ULONG& newPinLen);
+        CK_RV setPin(CK_UTF8CHAR_PTR oldPin, const CK_ULONG& oldPinLen,
+                     CK_UTF8CHAR_PTR newPin, const CK_ULONG& newPinLen,
+                     const CK_USER_TYPE&     userType);
 
         /**
         * Logs out a currently logged in user.
         * @return CK_RV   CKR_OK if currently loggedin user is logged out, error code otherwise.
         */
-        CK_RV logOut();
+        CK_RV logout();
 
         /**
         * Finalizes a token in a slot. This involves logging out any user logged in, closing all sessions
@@ -147,12 +119,26 @@ namespace P11Crypto
         */
         CK_RV finalize();
 
+        CK_RV login(const CK_UTF8CHAR_PTR pin, const CK_ULONG& pinLength, const CK_USER_TYPE& userType);
+
     private:
+
+        void loadTokenData();
 
         CK_SLOT_ID slotID;
 
         // Token validity
         bool isValid;
+
+        // Token file name
+        std::string tokenFile;
+
+        // Structure to store all token file fields
+        Utils::TokenUtils::TokenData tokenData{};
+
+        bool tokenDataLoaded = false;
+
+        static const uint8_t labelSize = 32;
     };
 }
 

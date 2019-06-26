@@ -34,6 +34,7 @@
 #include <sgx_utils.h>
 #include <sgx_trts.h>
 #include <sgx_tseal.h>
+#include <openssl/x509.h>
 #include "SymmetricCrypto.h"
 #include "AsymmetricCrypto.h"
 #include "HashCrypto.h"
@@ -92,30 +93,19 @@ static inline bool isInsideEnclave(const void* ptr, size_t length)
  */
 // enclave init/deinit operations
 //---------------------------------------------------------------------------------------------------------------------
-SgxStatus initCryptoEnclave(uint8_t providerType)
+SgxStatus initCryptoEnclave()
 {
-    SgxStatus    status             = static_cast<int>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
-    ProviderType cryptoProviderType = static_cast<ProviderType>(providerType);
-
-    switch (cryptoProviderType)
-    {
-        case ProviderType::PKCS11:
-            symmetricCrypto.clearKeys();
-            asymmetricCrypto.clearKeys();
-            cryptoHash.clearStates();
-            break;
-        default:
-            status = static_cast<int>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
-            break;
-    }
-
-    return status;
+    symmetricCrypto.clearKeys();
+    asymmetricCrypto.clearKeys();
+    cryptoHash.clearStates();
+    
+    return static_cast<int>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-SgxStatus deinitCryptoEnclave(uint8_t providerType)
+SgxStatus deinitCryptoEnclave()
 {
-    return initCryptoEnclave(providerType);
+    return initCryptoEnclave();
 }
 
 // symmetric operations
@@ -160,9 +150,10 @@ SgxStatus generateSymmetricKey(uint32_t*  keyId,
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-SgxStatus destroySymmetricKey(uint32_t keyId)
+SgxStatus destroyKey(uint32_t keyId, uint8_t keyType)
 {
     SgxStatus status{ 0 };
+    KeyType   type = static_cast<KeyType>(keyType);
 
     do
     {
@@ -172,7 +163,19 @@ SgxStatus destroySymmetricKey(uint32_t keyId)
             break;
         }
 
-        status = symmetricCrypto.removeSymmetricKey(keyId);
+        if (KeyType::Aes == type)
+        {
+            status = symmetricCrypto.removeSymmetricKey(keyId);
+        }
+        else if (KeyType::Rsa == type)
+        {
+            status = asymmetricCrypto.removeAsymmetricKey(keyId);
+        }
+        else
+        {
+            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
+        }
+        
     } while (false);
 
     return status;
@@ -257,7 +260,7 @@ SgxStatus digestInit(uint32_t   hashId,
             break;
         }
 
-        result = symmetricCrypto.getSymmetricKey(keyIdHmac, symKey);
+        result = symmetricCrypto.getSymmetricKey(keyIdHmac, &symKey);
         if (hmac && !result)
         {
             status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
@@ -278,7 +281,7 @@ SgxStatus digestInit(uint32_t   hashId,
         else
         {
             secretLen = symKey.key.size();
-            secretBuffer.reset(new uint8_t[secretLen]);
+            secretBuffer.reset(new (std::nothrow) uint8_t[secretLen]);
 
             if (!secretBuffer.get())
             {
@@ -434,25 +437,6 @@ SgxStatus generateAsymmetricKey(uint32_t*   publicKeyId,
             *privateKeyId = 0;
             break;
         }
-    } while (false);
-
-    return status;
-}
-
-//---------------------------------------------------------------------------------------------------------------------
-SgxStatus destroyAsymmetricKey(uint32_t keyId)
-{
-    SgxStatus status{ 0 };
-
-    do
-    {
-        if (!keyId)
-        {
-            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
-            break;
-        }
-
-        status = asymmetricCrypto.removeAsymmetricKey(keyId);
     } while (false);
 
     return status;
@@ -1208,7 +1192,7 @@ SgxStatus wrapSymmetricKeyWithSymmetricKey(uint32_t         keyId,
         __builtin_ia32_lfence();
 #endif
 
-        result = symmetricCrypto.getSymmetricKey(keyIdData, symKeyData);
+        result = symmetricCrypto.getSymmetricKey(keyIdData, &symKeyData);
 
         if (!result)
         {
@@ -1280,18 +1264,19 @@ SgxStatus wrapSymmetricKeyWithSymmetricKey(uint32_t         keyId,
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-SgxStatus unwrapSymmetricKeyWithSymmetricKey(uint32_t       keyId,
-                                             uint32_t*      unwrappedKeyId,
-                                             const uint8_t* sourceBuffer,
-                                             uint32_t       sourceBufferLen,
-                                             const uint8_t* iv,
-                                             uint32_t       ivSize,
-                                             const uint8_t* aad,
-                                             uint32_t       aadSize,
-                                             uint8_t        cipherMode,
-                                             int            padding,
-                                             uint32_t       tagBits,
-                                             int            counterBits)
+SgxStatus unwrapWithSymmetricKey(uint32_t       keyId,
+                                 uint32_t*      unwrappedKeyId,
+                                 const uint8_t* sourceBuffer,
+                                 uint32_t       sourceBufferLen,
+                                 const uint8_t* iv,
+                                 uint32_t       ivSize,
+                                 const uint8_t* aad,
+                                 uint32_t       aadSize,
+                                 uint8_t        cipherMode,
+                                 int            padding,
+                                 uint32_t       tagBits,
+                                 int            counterBits,
+                                 uint8_t        wrappedKeyType)
 {
     SgxStatus status{ 0 };
     bool      result      = keyId && unwrappedKeyId;
@@ -1331,7 +1316,7 @@ SgxStatus unwrapSymmetricKeyWithSymmetricKey(uint32_t       keyId,
 
         SymmetricKey symKey{};
 
-        result = symmetricCrypto.getSymmetricKey(keyId, symKey);
+        result = symmetricCrypto.getSymmetricKey(keyId, &symKey);
         if (!result)
         {
             status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE);
@@ -1360,7 +1345,7 @@ SgxStatus unwrapSymmetricKeyWithSymmetricKey(uint32_t       keyId,
             return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_BUFFER_SIZE);
         }
 
-        // Retrieve the destination buffer size required..
+        // Retrieve the destination buffer size required.
         uint32_t destBufferWritten = 0;
         status = symmetricCrypto.decryptUpdate(keyId,
                                                sourceBuffer,
@@ -1376,7 +1361,7 @@ SgxStatus unwrapSymmetricKeyWithSymmetricKey(uint32_t       keyId,
         }
 
         uint32_t tempDestBufferLen = destBufferWritten;
-        std::unique_ptr<uint8_t[]> tempDestBuffer(new uint8_t[tempDestBufferLen], std::default_delete<uint8_t[]>());
+        std::unique_ptr<uint8_t[]> tempDestBuffer(new (std::nothrow) uint8_t[tempDestBufferLen], std::default_delete<uint8_t[]>());
         if (!tempDestBuffer.get())
         {
             result = false;
@@ -1403,12 +1388,37 @@ SgxStatus unwrapSymmetricKeyWithSymmetricKey(uint32_t       keyId,
             break;
         }
 
-        SymmetricKey newSymKey{};
+        KeyType keyType = static_cast<KeyType>(wrappedKeyType);
+        if (KeyType::Aes == keyType)
+        {
+            SymmetricKey newSymKey{};
 
-        newSymKey.key.allocate(destBufferWritten);
-        newSymKey.key.fromData(tempDestBuffer.get(), destBufferWritten);
-        symmetricCrypto.addSymmetricKey(*unwrappedKeyId, newSymKey);
-        memset_s(tempDestBuffer.get(), tempDestBufferLen, 0, tempDestBufferLen);
+            newSymKey.key.allocate(destBufferWritten);
+            if (!newSymKey.key.isValid())
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY);
+                break;
+            }
+
+            newSymKey.key.fromData(tempDestBuffer.get(), destBufferWritten);
+            symmetricCrypto.addSymmetricKey(*unwrappedKeyId, newSymKey);
+            memset_s(tempDestBuffer.get(), tempDestBufferLen, 0, tempDestBufferLen);
+        }
+        else if (KeyType::Rsa == keyType)
+        {
+            const unsigned char* temp  = tempDestBuffer.get();
+            PKCS8_PRIV_KEY_INFO* pInfo = d2i_PKCS8_PRIV_KEY_INFO(NULL, &temp, destBufferWritten);
+
+            EVP_PKEY* evpKey = EVP_PKCS82PKEY(pInfo);
+            RSA* rsa = EVP_PKEY_get1_RSA(evpKey);
+
+            AsymmetricKey asymKey{};
+            asymKey.key               = rsa;
+            asymKey.isUsedForWrapping = false;
+
+            asymmetricCrypto.addRsaPrivateKey(*unwrappedKeyId, asymKey);
+        }
+
     } while (false);
 
     return status;
@@ -1531,10 +1541,10 @@ SgxStatus platformBindAsymmetricKey(uint32_t    keyId,
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-SgxStatus unwrapAndImportPlatformBoundAsymmetricKey(uint32_t*       publicKeyId,
-                                                    uint32_t*       privateKeyId,
-                                                    const uint8_t*  sourceBuffer,
-                                                    uint32_t        sourceBufferLen)
+SgxStatus unsealAsymmetricKey(uint32_t*      publicKeyId,
+                              uint32_t*      privateKeyId,
+                              const uint8_t* sourceBuffer,
+                              uint32_t       sourceBufferLen)
 {
     SgxStatus status{ 0 };
     bool      result      = false;
@@ -1629,7 +1639,7 @@ SgxStatus wrapWithAsymmetricKey(uint32_t  asymmetricKeyId,
 
         SymmetricKey symKey{};
 
-        result = symmetricCrypto.getSymmetricKey(symmetricKeyId, symKey);
+        result = symmetricCrypto.getSymmetricKey(symmetricKeyId, &symKey);
         if (!result)
         {
             status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
@@ -1731,7 +1741,7 @@ SgxStatus unwrapWithAsymmetricKey(uint32_t          asymmetricKeyId,
         }
 
         tempDestBufferSize = destBufferRequiredLength;
-        std::unique_ptr<uint8_t[]> tempDestBuffer(new uint8_t[tempDestBufferSize], std::default_delete<uint8_t[]>());
+        std::unique_ptr<uint8_t[]> tempDestBuffer(new (std::nothrow) uint8_t[tempDestBufferSize], std::default_delete<uint8_t[]>());
         if (!tempDestBuffer.get())
         {
             result = false;
@@ -1760,6 +1770,12 @@ SgxStatus unwrapWithAsymmetricKey(uint32_t          asymmetricKeyId,
         SymmetricKey newSymKey{};
 
         newSymKey.key.allocate(tempDestBufferSize);
+        if (!newSymKey.key.isValid())
+        {
+            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY);
+            break;
+        }
+
         newSymKey.key.fromData(tempDestBuffer.get(), tempDestBufferSize);
         symmetricCrypto.addSymmetricKey(*unwrappedKeyId, newSymKey);
 
@@ -1958,7 +1974,7 @@ SgxStatus sealData(uint8_t*   sourceBuffer,
                 break;
             }
 
-            std::unique_ptr<uint8_t[]> dataToBePlatformBound(new uint8_t[pbindInputDataSize]);
+            std::unique_ptr<uint8_t[]> dataToBePlatformBound(new (std::nothrow) uint8_t[pbindInputDataSize]);
             if (!dataToBePlatformBound.get())
             {
                 *destBufferWritten = 0;
@@ -2117,7 +2133,7 @@ SgxStatus unsealData(uint8_t*   sourceBuffer,
                 result = true;
                 break;
             }
-            std::unique_ptr<uint8_t[]> tempDest(new uint8_t[decryptedDataSize], std::default_delete<uint8_t[]>());
+            std::unique_ptr<uint8_t[]> tempDest(new (std::nothrow) uint8_t[decryptedDataSize], std::default_delete<uint8_t[]>());
 
             if (!tempDest.get())
             {
@@ -2155,106 +2171,6 @@ SgxStatus unsealData(uint8_t*   sourceBuffer,
     } while (false);
 
     return static_cast<SgxStatus>(status);
-}
-
-//---------------------------------------------------------------------------------------------------------------------
-SgxStatus updateSessionCount(uint8_t*   sourceBuffer,
-                             uint32_t   sourceBufferLen,
-                             uint8_t*   destBuffer,
-                             uint32_t   destBufferLen,
-                             uint32_t*  destBufferWritten,
-                             int        updateSession)
-{
-    SgxStatus   status           = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL);
-    uint32_t    bytesNeeded      = 0;
-    uint32_t    unsealBufferSize = 0;
-    std::string newSessionCount;
-    uint32_t    ptrDataSize = sizeof(std::remove_pointer<decltype(destBufferWritten)>::type);
-
-    do
-    {
-        if (!destBufferWritten ||
-            !checkUserCheckPointer(reinterpret_cast<uint8_t*>(destBufferWritten), ptrDataSize))
-        {
-            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
-            break;
-        }
-
-        status = unsealData(sourceBuffer,
-                            sourceBufferLen,
-                            nullptr,
-                            0,
-                            &bytesNeeded);
-        if (static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS) != status)
-        {
-            *destBufferWritten = 0;
-            break;
-        }
-
-        unsealBufferSize = bytesNeeded;
-        std::unique_ptr<uint8_t[]> unsealedBuffer(new uint8_t[unsealBufferSize], std::default_delete<uint8_t[]>());
-        if (!unsealedBuffer.get())
-        {
-            *destBufferWritten = 0;
-            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY);
-            break;
-        }
-
-        bytesNeeded = 0;
-        status = unsealData(sourceBuffer,
-                            sourceBufferLen,
-                            unsealedBuffer.get(),
-                            unsealBufferSize,
-                            &bytesNeeded);
-        if (static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS) != status)
-        {
-            *destBufferWritten = 0;
-            break;
-        }
-
-        std::string sessionCount(reinterpret_cast<char *>(unsealedBuffer.get()), bytesNeeded);
-
-        if (UpdateSession::OPEN == static_cast<UpdateSession>(updateSession))
-        {
-            newSessionCount = std::to_string(std::stoi(sessionCount) + 1);
-        }
-        else
-        {
-            newSessionCount = std::to_string(std::stoi(sessionCount) - 1);
-        }
-
-        *destBufferWritten = 0;
-        status = sealData(reinterpret_cast<uint8_t*>(&newSessionCount.at(0)),
-                          newSessionCount.size(),
-                          nullptr,
-                          0,
-                          destBufferWritten);
-        if (static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS) != status)
-        {
-            *destBufferWritten = 0;
-            break;
-        }
-
-        if (!destBuffer)
-        {
-            break;
-        }
-
-        *destBufferWritten = 0;
-        status = sealData(reinterpret_cast<uint8_t*>(&newSessionCount.at(0)),
-                          newSessionCount.size(),
-                          destBuffer,
-                          destBufferLen,
-                          destBufferWritten);
-        if (static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS) != status)
-        {
-            *destBufferWritten = 0;
-            break;
-        }
-
-    } while(false);
-
-    return status;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -2297,7 +2213,7 @@ SgxStatus validatePin(uint8_t*  pin,
 
         unsealedDataSize = bytesNeeded;
 
-        std::unique_ptr<uint8_t[]> unsealedPin(new uint8_t[unsealedDataSize], std::default_delete<uint8_t[]>());
+        std::unique_ptr<uint8_t[]> unsealedPin(new (std::nothrow) uint8_t[unsealedDataSize], std::default_delete<uint8_t[]>());
         if (!unsealedPin.get())
         {
             status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY);
@@ -2348,225 +2264,6 @@ SgxStatus validatePin(uint8_t*  pin,
         }
 
         status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
-    } while(false);
-
-    return status;
-}
-
-//---------------------------------------------------------------------------------------------------------------------
-SgxStatus checkSessionExistence(uint8_t* sealedSessionCount,
-                                uint32_t sealedSessionCountLen)
-{
-    SgxStatus   status           = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL);
-    uint32_t    bytesNeeded      = 0;
-    uint32_t    unsealedDataSize = 0;
-
-    do
-    {
-        status = unsealData(sealedSessionCount,
-                            sealedSessionCountLen,
-                            nullptr,
-                            0,
-                            &bytesNeeded);
-        if (static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS) != status)
-        {
-            break;
-        }
-
-        unsealedDataSize = bytesNeeded;
-
-        std::unique_ptr<uint8_t[]> unsealedBuffer(new uint8_t[unsealedDataSize], std::default_delete<uint8_t[]>());
-        if (!unsealedBuffer.get())
-        {
-            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY);
-            break;
-        }
-
-        bytesNeeded = 0;
-        status = unsealData(sealedSessionCount,
-                            sealedSessionCountLen,
-                            unsealedBuffer.get(),
-                            unsealedDataSize,
-                            &bytesNeeded);
-        if (static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS) != status)
-        {
-            break;
-        }
-
-        std::string sessionCount(reinterpret_cast<char *>(unsealedBuffer.get()), bytesNeeded);
-
-        if ("0" != sessionCount)
-        {
-            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SESSION_EXISTS);
-        }
-        else
-        {
-            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
-        }
-
-    } while(false);
-
-    return status;
-}
-
-//---------------------------------------------------------------------------------------------------------------------
-SgxStatus checkLoginStatus(uint8_t* sealedBuffer,
-                           uint32_t sealedBufferLen)
-{
-    SgxStatus   status           = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL);
-    uint32_t    bytesNeeded      = 0;
-    uint32_t    unsealedDataSize = 0;
-
-    do
-    {
-        status = unsealData(sealedBuffer,
-                            sealedBufferLen,
-                            nullptr,
-                            0,
-                            &bytesNeeded);
-        if (static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS) != status)
-        {
-            break;
-        }
-
-        unsealedDataSize = bytesNeeded;
-
-        std::unique_ptr<uint8_t[]> unsealedBuffer(new uint8_t[unsealedDataSize], std::default_delete<uint8_t[]>());
-        if (!unsealedBuffer.get())
-        {
-            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY);
-            break;
-        }
-
-        bytesNeeded = 0;
-        status = unsealData(sealedBuffer,
-                            sealedBufferLen,
-                            unsealedBuffer.get(),
-                            unsealedDataSize,
-                            &bytesNeeded);
-        if (static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS) != status)
-        {
-            break;
-        }
-
-        std::string loginStatus(reinterpret_cast<char *>(unsealedBuffer.get()), bytesNeeded);
-
-        if ("FALSE" == loginStatus)
-        {
-            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_NOT_LOGGED);
-        }
-        else if ("TRUE" == loginStatus)
-        {
-            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_LOGGED_IN);
-        }
-        else
-        {
-            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL);
-        }
-
-    } while(false);
-
-    return status;
-}
-
-//---------------------------------------------------------------------------------------------------------------------
-SgxStatus updateLoginStatus(uint8_t*   sourceBuffer,
-                            uint32_t   sourceBufferLen,
-                            uint8_t*   destBuffer,
-                            uint32_t   destBufferLen,
-                            uint32_t*  destBufferWritten)
-{
-    SgxStatus   status      = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL);
-    uint32_t    ptrDataSize = sizeof(std::remove_pointer<decltype(destBufferWritten)>::type);
-    uint32_t    bytesNeeded = 0;
-    std::string newLoginStatus;
-
-    do
-    {
-        if (!destBufferWritten ||
-            !checkUserCheckPointer(reinterpret_cast<uint8_t*>(destBufferWritten), ptrDataSize))
-        {
-            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
-            break;
-        }
-
-        status = unsealData(sourceBuffer,
-                            sourceBufferLen,
-                            nullptr,
-                            0,
-                            &bytesNeeded);
-        if (static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS) != status)
-        {
-            *destBufferWritten = 0;
-            break;
-        }
-
-        uint32_t unsealedBufferSize = bytesNeeded;
-        std::unique_ptr<uint8_t[]> unsealedBuffer(new uint8_t[unsealedBufferSize], std::default_delete<uint8_t[]>());
-        if (!unsealedBuffer.get())
-        {
-            *destBufferWritten = 0;
-            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY);
-            break;
-        }
-
-        bytesNeeded = 0;
-        status = unsealData(sourceBuffer,
-                            sourceBufferLen,
-                            unsealedBuffer.get(),
-                            unsealedBufferSize,
-                            &bytesNeeded);
-        if (static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS) != status)
-        {
-            *destBufferWritten = 0;
-            break;
-        }
-
-        std::string loginStatus(reinterpret_cast<char *>(unsealedBuffer.get()), bytesNeeded);
-        if ("FALSE" == loginStatus)
-        {
-            newLoginStatus = "TRUE";
-        }
-        else if ("TRUE" == loginStatus)
-        {
-            newLoginStatus = "FALSE";
-        }
-        else
-        {
-            *destBufferWritten = 0;
-            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
-            break;
-        }
-
-        *destBufferWritten = 0;
-        status = sealData(reinterpret_cast<uint8_t*>(&newLoginStatus.at(0)),
-                          newLoginStatus.size(),
-                          nullptr,
-                          0,
-                          destBufferWritten);
-        if (static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS) != status)
-        {
-            *destBufferWritten = 0;
-            break;
-        }
-
-        if (!destBuffer)
-        {
-            break;
-        }
-
-        *destBufferWritten = 0;
-        status = sealData(reinterpret_cast<uint8_t*>(&newLoginStatus.at(0)),
-                          newLoginStatus.size(),
-                          destBuffer,
-                          destBufferLen,
-                          destBufferWritten);
-        if (static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS) != status)
-        {
-            *destBufferWritten = 0;
-            break;
-        }
-
     } while(false);
 
     return status;

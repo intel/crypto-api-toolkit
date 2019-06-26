@@ -32,7 +32,12 @@
 noinst_DATA = p11Enclave_t.c p11Enclave_t.h
 AM_CFLAGS = -D_FORTIFY_SOURCE=2 -m64 -Wall -O2 -DOSID=1 -nostdinc -fvisibility=hidden -fpie -fpic -fstack-protector -fno-builtin-printf -Wformat -Wformat-security -include "tsgxsslio.h" -Wno-implicit-function-declaration -std=c11 -fno-strict-overflow -fno-delete-null-pointer-checks -fwrapv
 AM_CXXFLAGS = -D_FORTIFY_SOURCE=2 -std=c++11 -nostdinc++ -fstack-protector -Wformat -Wformat-security -fpie -fpic -fno-strict-overflow -fno-delete-null-pointer-checks -fwrapv
+
+if WITH_DCAP
+AM_CPPFLAGS = -I$(SGXSSLDIR)/include -I$(SGXSDKDIR)/include -I$(SGXSDKDIR)/include/ipp -I$(SGXSDKDIR)/include/tlibc -I$(SGXSDKDIR)/include/libcxx -I$(SGXSDKDIR)/include/stdc++ -I$(SGXSDKDIR)/include/stlport -I$(DCAP_INCLUDE_PATH) -I$(srcdir)/../include -I$(srcdir)/../enclave_config
+else
 AM_CPPFLAGS = -I$(SGXSSLDIR)/include -I$(SGXSDKDIR)/include -I$(SGXSDKDIR)/include/ipp -I$(SGXSDKDIR)/include/tlibc -I$(SGXSDKDIR)/include/libcxx -I$(SGXSDKDIR)/include/stdc++ -I$(SGXSDKDIR)/include/stlport -I$(srcdir)/../include -I$(srcdir)/../enclave_config
+endif
 
 EXTRA_DIST = $(srcdir)/../include/*.h \
              $(srcdir)/../enclave_config/*.xml \

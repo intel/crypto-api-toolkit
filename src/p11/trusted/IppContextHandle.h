@@ -36,6 +36,7 @@
 
 #include "Constants.h"
 #include <ippcp.h>
+#include <new>
 
 namespace CryptoSgx
 {

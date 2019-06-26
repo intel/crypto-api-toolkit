@@ -32,14 +32,10 @@
 #ifndef HASH_PROVIDER_H
 #define HASH_PROVIDER_H
 
-#include <memory>
-#include <map>
-#include <mutex>
 
-#include "CryptoEnclaveDefs.h"
-#include "SessionHandleCache.h"
-#include "HashHandleCache.h"
-#include "p11Defines.h"
+#include <sgx_error.h>
+
+#include "EnclaveUtils.h"
 
 namespace P11Crypto
 {
@@ -47,59 +43,53 @@ namespace P11Crypto
                                                                         { HashMode::sha256, HashDigestLength::sha256 },
                                                                         { HashMode::sha512, HashDigestLength::sha512 }
                                                                       };
-    class HashProvider
+    namespace HashProvider
     {
-    public:
-
-        static std::shared_ptr<HashProvider> getHashProvider();
-
-        HashProvider() = default;
-
+        //---------------------------------------------------------------------------------------------
         /**
-        * Initializes a hash operation
-        * @param    hashHandle          The hash handle
-        * @param    keyHandleForHmac    The symmetric key handle to be used as key for HMAC
-        * @param    hashMode            The HashMode to be used
-        * @param    hmac                True if hmac, false otherwise
-        * @return	CK_RV		        CKR_OK if operation is successful, error code otherwise
+        * Initializes a hash operation.
+        * @param    hashHandle          The hash handle.
+        * @param    keyHandleForHmac    The symmetric key handle to be used as key for HMAC.
+        * @param    hashMode            The HashMode to be used.
+        * @param    hmac                True if hmac, false otherwise.
+        * @return	CK_RV		        CKR_OK if operation is successful, error code otherwise.
         */
-        CK_RV hashInit(uint32_t*        hashHandle,
-                       const uint32_t&  keyHandleForHmac,
-                       const HashMode&  hashMode,
-                       const bool&      hmac);
+        CK_RV hashInit(uint32_t*       hashHandle,
+                       const uint32_t& keyHandleForHmac,
+                       const HashMode& hashMode,
+                       const bool&     hmac);
 
+        //---------------------------------------------------------------------------------------------
         /**
-        * Continues a hash operation
-        * @param    hashHandle          The hash handle
-        * @param    sourceBuffer        The data to be hashed
-        * @param    sourceBufferLen     The length in bytes of data to be hashed
-        * @return	CK_RV		        CKR_OK if operation is successful, error code otherwise
+        * Continues a hash operation.
+        * @param    hashHandle          The hash handle.
+        * @param    sourceBuffer        The data to be hashed.
+        * @param    sourceBufferLen     The length in bytes of data to be hashed.
+        * @return	CK_RV		        CKR_OK if operation is successful, error code otherwise.
         */
-        CK_RV hashUpdate(const uint32_t&    hashHandle,
-                         const uint8_t*     sourceBuffer,
-                         const uint32_t&    sourceBufferLen);
+        CK_RV hashUpdate(const uint32_t& hashHandle,
+                         const uint8_t*  sourceBuffer,
+                         const uint32_t& sourceBufferLen);
 
+        //---------------------------------------------------------------------------------------------
         /**
-        * Finalizes a hash operation
-        * @param    hashHandle        The hash handle
-        * @param    destBuffer        The buffer to hold the hash
-        * @param    destBufferLen     The length in bytes of destBuffer
-        * @return	CK_RV		      CKR_OK if operation is successful, error code otherwise
+        * Finalizes a hash operation.
+        * @param    hashHandle        The hash handle.
+        * @param    destBuffer        The buffer to hold the hash.
+        * @param    destBufferLen     The length in bytes of destBuffer.
+        * @return	CK_RV		      CKR_OK if operation is successful, error code otherwise.
         */
-        CK_RV hashFinal(const uint32_t&    hashHandle,
-                        uint8_t*           destBuffer,
-                        const uint32_t&    destBufferLen);
+        CK_RV hashFinal(const uint32_t& hashHandle,
+                        uint8_t*        destBuffer,
+                        const uint32_t& destBufferLen);
 
+        //---------------------------------------------------------------------------------------------
         /**
-        * Clears the removes a hash handle from the hashHandle cache
-        * @param    hashHandle        The hash handle
-        * @param    hashHandleCache   The hash handle cache
-        * @return	CK_RV		      CKR_OK if operation is successful, error code otherwise
+        * Clears the removes a hash handle from the hashHandle cache.
+        * @param    hashHandle        The hash handle.
+        * @return	CK_RV		      CKR_OK if operation is successful, error code otherwise.
         */
-        CK_RV destroyHash(const uint32_t&                   hashHandle,
-                          std::shared_ptr<HashHandleCache>  hashHandleCache);
-
-        static std::recursive_mutex mProviderMutex;
+        CK_RV destroyHash(const uint32_t& hashHandle);
     };
 }
 #endif //HASH_PROVIDER_H

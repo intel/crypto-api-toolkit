@@ -44,7 +44,8 @@ namespace CryptoSgx
     enum class OperationType
     {
         Public  = 0,
-        Private = 1
+        Private = 1,
+        Any     = 2
     };
 
     /**
@@ -57,6 +58,10 @@ namespace CryptoSgx
          * Constructor.
          */
         AsymmetricCrypto();
+
+        AsymmetricCrypto(const AsymmetricCrypto& other) = delete;
+
+        AsymmetricCrypto& operator=(const AsymmetricCrypto& other) = delete;
 
         /**
          * Destructor.
@@ -183,7 +188,7 @@ namespace CryptoSgx
         */
         SgxStatus sign(const uint32_t&   keyId,
                        const uint8_t*    sourceBuffer,
-                       size_t            sourceBufferLen,
+                       const uint32_t&   sourceBufferLen,
                        uint8_t*          destBuffer,
                        size_t            destBufferLen,
                        uint32_t*         destBufferRequiredLength,
@@ -254,36 +259,44 @@ namespace CryptoSgx
         */
         bool checkWrappingStatus(const uint32_t& keyId);
 
-    private:
-        bool encrypt(AsymmetricKey&     asymmetricKey,
-                     const RsaPadding&  rsaPadding,
-                     uint8_t*           destBuffer,
-                     const uint32_t&    destBufferLen,
-                     uint32_t*          destBufferRequiredLength,
-                     const uint8_t*     sourceBuffer,
-                     const uint32_t&    sourceBufferLen,
-                     SgxCryptStatus&    status);
+        /**
+         * Adds a symmetric key into cache.
+         * @param keyId          The key Id from provider
+         * @param asymmetricKey  The asymmetric key.
+         * @return               SgxStatus value - SGX_CRYPT_STATUS_SUCCESS when success or error code otherwise
+         */
+        SgxStatus addRsaPrivateKey(const uint32_t& keyId, const AsymmetricKey& asymmetricKey);
 
-        bool decrypt(AsymmetricKey&     asymmetricKey,
-                    const RsaPadding&   rsaPadding,
-                    uint8_t*            destBuffer,
-                    const uint32_t&     destBufferLen,
-                    uint32_t*           destBufferRequiredLength,
-                    const uint8_t*      sourceBuffer,
-                    const uint32_t&     sourceBufferLen,
-                    SgxCryptStatus&     status);
+    private:
+        bool encrypt(const AsymmetricKey&   asymmetricKey,
+                     const RsaPadding&      rsaPadding,
+                     uint8_t*               destBuffer,
+                     const uint32_t&        destBufferLen,
+                     uint32_t*              destBufferRequiredLength,
+                     const uint8_t*         sourceBuffer,
+                     const uint32_t&        sourceBufferLen,
+                     SgxCryptStatus*        status);
+
+        bool decrypt(const AsymmetricKey&   asymmetricKey,
+                     const RsaPadding&      rsaPadding,
+                     uint8_t*               destBuffer,
+                     const uint32_t&        destBufferLen,
+                     uint32_t*              destBufferRequiredLength,
+                     const uint8_t*         sourceBuffer,
+                     const uint32_t&        sourceBufferLen,
+                     SgxCryptStatus*        status);
 
         bool getAsymmetricKey(const uint32_t&       keyId,
-                              AsymmetricKey&        key,
+                              AsymmetricKey*        key,
                               const OperationType&  opType);
 
-        bool signHashPss(AsymmetricKey&     asymKey,
-                         const uint8_t*     sourceBuffer,
-                         uint8_t*           destBuffer,
-                         const int&         rsaBlockSize,
-                         const EVP_MD*      evpMd,
-                         const uint32_t&    salt,
-                         SgxCryptStatus&    status);
+        bool signHashPss(const AsymmetricKey&   asymKey,
+                         const uint8_t*         sourceBuffer,
+                         uint8_t*               destBuffer,
+                         const int&             rsaBlockSize,
+                         const EVP_MD*          evpMd,
+                         const uint32_t&        salt,
+                         SgxCryptStatus*        status);
 
         bool verifySignaturePss(const AsymmetricKey&  asymKey,
                                 const uint8_t*        sourceBuffer,
@@ -291,18 +304,18 @@ namespace CryptoSgx
                                 const int&            rsaBlockSize,
                                 const EVP_MD*         evpMd,
                                 const uint32_t&       salt,
-                                SgxCryptStatus&       status);
+                                SgxCryptStatus*       status);
 
-        bool exportPlatformBoundKey(AsymmetricKey&      symKey,
-                                    uint8_t*            destBuffer,
-                                    const uint32_t&     destBufferLen,
-                                    uint32_t*           destBufferWritten,
-                                    SgxCryptStatus&     status);
+        bool exportPlatformBoundKey(const AsymmetricKey&    asymKey,
+                                    uint8_t*                destBuffer,
+                                    const uint32_t&         destBufferLen,
+                                    uint32_t*               destBufferWritten,
+                                    SgxCryptStatus*         status);
 
-        bool importPlatformBoundKey(AsymmetricKey&      symKey,
-                                    const uint8_t*      sourceBuffer,
-                                    const uint32_t&     sourceBufferLen,
-                                    SgxCryptStatus&     status);
+        bool importPlatformBoundKey(AsymmetricKey*  asymKey,
+                                    const uint8_t*  sourceBuffer,
+                                    const uint32_t& sourceBufferLen,
+                                    SgxCryptStatus* status);
 
         AsymmetricKeyCache mAsymmetricPublicKeyCache;
         AsymmetricKeyCache mAsymmetricPrivateKeyCache;

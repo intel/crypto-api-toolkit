@@ -4,7 +4,7 @@
  * IMPLIED OR EXPRESS WARRANTY; there is no warranty of MERCHANTABILITY, FITNESS FOR A
  * PARTICULAR PURPOSE or NONINFRINGEMENT of the rights of others.
  */
-
+        
 /* Latest version of the specification:
  * http://docs.oasis-open.org/pkcs11/pkcs11-base/v2.40/pkcs11-base-v2.40.html
  */
@@ -383,7 +383,7 @@ typedef CK_ULONG          CK_KEY_TYPE;
 #define CKK_GOSTR3411           0x00000031UL
 #define CKK_GOST28147           0x00000032UL
 
-#define CKK_EC_EDWARDS          (CKK_VENDOR_DEFINED|0x00008003)
+
 
 #define CKK_VENDOR_DEFINED      0x80000000UL
 
@@ -409,7 +409,7 @@ typedef CK_ULONG          CK_CERTIFICATE_TYPE;
 #define CKC_X_509_ATTR_CERT     0x00000001UL
 #define CKC_WTLS                0x00000002UL
 #define CKC_VENDOR_DEFINED      0x80000000UL
-#define CKC_OPENPGP     (CKC_VENDOR_DEFINED|0x00504750)
+
 
 /* CK_ATTRIBUTE_TYPE is a value that identifies an attribute
  * type
@@ -497,7 +497,6 @@ typedef CK_ULONG          CK_ATTRIBUTE_TYPE;
 #define CKA_NEVER_EXTRACTABLE  0x00000164UL
 #define CKA_ALWAYS_SENSITIVE   0x00000165UL
 #define CKA_KEY_GEN_MECHANISM  0x00000166UL
-#define CKA_VALUE_KEY_BUFFER   0x00000167UL
 
 #define CKA_MODIFIABLE         0x00000170UL
 #define CKA_COPYABLE           0x00000171UL
@@ -724,10 +723,6 @@ typedef CK_ULONG          CK_MECHANISM_TYPE;
 #define CKM_HOTP                       0x00000291UL
 #define CKM_ACTI                       0x000002A0UL
 #define CKM_ACTI_KEY_GEN               0x000002A1UL
-
-// SGX CKMs for HMAC
-#define CKM_SHA256_HMAC_AES_KEYID      0x000002A2UL
-#define CKM_SHA512_HMAC_AES_KEYID      0x000002A3UL
 
 #define CKM_CAST_KEY_GEN               0x00000300UL
 #define CKM_CAST_ECB                   0x00000301UL
@@ -975,19 +970,8 @@ typedef CK_ULONG          CK_MECHANISM_TYPE;
 #define CKM_AES_KEY_WRAP               0x00002109UL     /* WAS: 0x00001090 */
 #define CKM_AES_KEY_WRAP_PAD           0x0000210AUL     /* WAS: 0x00001091 */
 
-// SGXHSM CKMs...
-#define CKM_AES_PBIND                     0x0000210BUL
-#define CKM_RSA_PBIND_EXPORT              0x0000210CUL
-#define CKM_EXPORT_RSA_PUBLIC_KEY         0x0000210DUL
-#define CKM_IMPORT_RSA_PUBLIC_KEY         0x0000210EUL
-#define CKM_EXPORT_QUOTE_RSA_PUBLIC_KEY   0x0000210FUL
-#define CKM_RSA_PBIND_IMPORT              0x00002110UL
-
 #define CKM_RSA_PKCS_TPM_1_1           0x00004001UL
 #define CKM_RSA_PKCS_OAEP_TPM_1_1      0x00004002UL
-
-#define CKM_EC_EDWARDS_KEY_PAIR_GEN    (CKM_VENDOR_DEFINED|0x00009040)
-#define CKM_EDDSA                      (CKM_VENDOR_DEFINED|0x00009041)
 
 #define CKM_VENDOR_DEFINED             0x80000000UL
 
@@ -1143,7 +1127,6 @@ typedef CK_ULONG          CK_RV;
 #define CKR_WRAPPING_KEY_HANDLE_INVALID       0x00000113UL
 #define CKR_WRAPPING_KEY_SIZE_RANGE           0x00000114UL
 #define CKR_WRAPPING_KEY_TYPE_INCONSISTENT    0x00000115UL
-#define CKR_KEY_TYPE_UNSUPPORTED              0x00000116UL
 #define CKR_RANDOM_SEED_NOT_SUPPORTED         0x00000120UL
 
 #define CKR_RANDOM_NO_RNG                     0x00000121UL
@@ -1846,36 +1829,6 @@ typedef struct CK_AES_CTR_PARAMS {
 } CK_AES_CTR_PARAMS;
 
 typedef CK_AES_CTR_PARAMS CK_PTR CK_AES_CTR_PARAMS_PTR;
-
-typedef struct CK_HMAC_AES_KEYID_PARAMS {
-    CK_ULONG ulKeyID;
-} CK_HMAC_AES_KEYID_PARAMS;
-
-typedef CK_HMAC_AES_KEYID_PARAMS CK_PTR CK_HMAC_AES_KEYID_PARAMS_PTR;
-
-typedef struct CK_RSA_PUBLIC_KEY_PARAMS {
-    CK_ULONG ulExponentLen;
-    CK_ULONG ulModulusLen;
-} CK_RSA_PUBLIC_KEY_PARAMS;
-
-typedef CK_RSA_PUBLIC_KEY_PARAMS CK_PTR CK_RSA_PUBLIC_KEY_PARAMS_PTR;
-
-typedef struct CK_QUOTE_RSA_PUBLIC_KEY_PARAMS {
-    CK_BYTE_PTR       pSpid;
-    CK_ULONG          ulSpidLen;
-    CK_BYTE_PTR       pSigRL;
-    CK_ULONG          ulSigRLLen;
-    CK_ULONG          ulQuoteSignatureType;
-} CK_QUOTE_RSA_PUBLIC_KEY_PARAMS;
-
-typedef CK_QUOTE_RSA_PUBLIC_KEY_PARAMS CK_PTR CK_QUOTE_RSA_PUBLIC_KEY_PARAMS_PTR;
-
-typedef struct CK_RSA_PBIND_IMPORT_PARAMS {
-    CK_BYTE_PTR   pPlatformBoundKey;
-    CK_ULONG      ulPlatformBoundKeyLen;
-} CK_RSA_PBIND_IMPORT_PARAMS;
-
-typedef CK_RSA_PBIND_IMPORT_PARAMS CK_PTR CK_RSA_PBIND_IMPORT_PARAMS_PTR;
 
 typedef struct CK_GCM_PARAMS {
     CK_BYTE_PTR       pIv;

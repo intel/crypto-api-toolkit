@@ -48,6 +48,7 @@ The build can be configured using the following additional options.
 | --with-toolkit-path=/path-for-tokens/   | Sets the location for tokens to be created. Defaults to /opt/intel/cryptoapitoolkit/ if this option is not specified. |
 | --with-sgxsdk=/path-to-sgxsdk-installation/ | The SGX SDK installation directory. Defaults to /opt/intel/sgxsdk/ if this option is not specified. |
 | --with-sgxssl=/path-to-sgxssl-installation/ | The SGX SSL installation directory. Defaults to /opt/intel/sgxssl/ if this option is not specified. |
+| --with-dcap-path=/path-to-dcap-include-path/ | The DCAP include directory. If this option is not provided while configuring, features depending on DCAP are not supported. |
 | --enable-import-raw-symkey-support= "yes" | Setting this option to ‘yes’ allows importing a data buffer (raw key import) into Crypto API Toolkit. |
 | --enable-import-raw-symkey-support-for-hmac="yes" | Setting this option to ‘yes’ allows the use of raw key imported as the secret buffer for HMAC operations. |
 
@@ -68,4 +69,3 @@ The provider (untrusted) and the enclave (trusted) libraries can be uninstalled 
 ```
 sudo make uninstall
 ```
-

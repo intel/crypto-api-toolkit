@@ -32,8 +32,20 @@
 #ifndef CRYPTOENCLAVEDEFS_H
 #define CRYPTOENCLAVEDEFS_H
 
-#include <string>
 #include "config.h"
+
+#include <string>
+#include <sgx_key.h>
+
+#ifdef DCAP_SUPPORT
+#include "sgx_pce.h"
+#endif
+
+#include <vector>
+#include <bitset>
+#include <set>
+#include "p11Defines.h"
+#include "Constants.h"
 
 static const uint8_t  bitsPerByte                = 8;
 static const uint8_t  aesBlockSize               = 16;
@@ -46,19 +58,14 @@ static const uint32_t maxCounterBitsSupported    = 128;
 static const uint8_t  maxSlotsSupported          = 100;
 static const uint8_t  minPinLength               = 1;
 static const uint8_t  maxPinLength               = 255;
-static const uint8_t  maxSessionCount            = 100;
+static const uint8_t  maxSessionsSupported       = 100;
+static const uint8_t  maxRwSessionsSupported     = 100;
 
 static const std::string toolkitPath        = CRYPTOTOOLKIT_TOKENPATH;
 static const std::string tokenPath          = toolkitPath + "/tokens/";
 static const std::string installationPath   = INSTALL_DIRECTORY;
 static const std::string libraryDirectory   = installationPath + "/lib/";
 static const std::string defaultLibraryPath = "/usr/local/lib/";
-
-enum class ProviderType
-{
-    Unknown = 0,
-    PKCS11
-};
 
 // Supported AES block cipher modes.
 enum class BlockCipherMode
@@ -110,17 +117,6 @@ enum class KeyWrapMode
     ecb
 };
 
-// Active session operation
-enum class ActiveOperation
-{
-    NONE,
-    ENCRYPT,
-    DECRYPT,
-    SIGN,
-    VERIFY,
-    HASH
-};
-
 enum class SymmetricKeySize
 {
     keyLength128 = 16,
@@ -153,12 +149,10 @@ enum class SgxMaxDataLimitsInBytes
 
 enum class RsaPadding
 {
+    rsaPkcs1     = 1,
     rsaNoPadding = 3,
-    rsaPkcs1Oaep,
-    rsaPkcs1,
-    rsaSslv23,
-    rsaX391,
-    rsaPkcs1Pss
+    rsaPkcs1Oaep = 4,
+    rsaPkcs1Pss  = 6
 };
 
 enum class BlockCipherPadding
@@ -173,8 +167,16 @@ enum class UpdateSession
     CLOSE = 1
 };
 
+enum class KeyType : uint8_t
+{
+    Invalid = 0,
+    Aes     = 1,
+    Rsa     = 2
+};
+
 enum class KeyGenerationMechanism
 {
+    invalid,
     aesGenerateKey,
     aesImportRawKey,
     rsaGeneratePublicKey,
@@ -208,10 +210,341 @@ enum class SgxCryptStatus
     SGX_CRYPT_STATUS_INVALID_WRAPPED_KEY,
     SGX_CRYPT_STATUS_INVALID_TAG_SIZE,
     SGX_CRYPT_STATUS_INVALID_BUFFER_SIZE,
-    SGX_CRYPT_STATUS_UNSUCCESSFUL,
-    SGX_CRYPT_STATUS_SESSION_EXISTS,
-    SGX_CRYPT_STATUS_LOGGED_IN,
-    SGX_CRYPT_STATUS_NOT_LOGGED
+    SGX_CRYPT_STATUS_UNSUCCESSFUL
+
+
 };
+
+// Bool key attributes : Grows in power of 2.
+enum BoolAttribute
+{
+    ENCRYPT              = 1,
+    DECRYPT              = 2,
+    WRAP                 = 3,
+    UNWRAP               = 4,
+    SIGN                 = 5,
+    VERIFY               = 6,
+    TOKEN                = 7,
+    PRIVATE              = 8,
+    LOCAL                = 9,
+    MODIFIABLE           = 10,
+    DERIVE               = 11,
+    COPYABLE             = 12,
+    MAX_BOOL_ATTRIBUTES  = 13
+};
+
+using UlongAttributeType  = std::pair<CK_ULONG, CK_ULONG>;
+using StringAttributeType = std::pair<CK_ULONG, std::string>;
+
+using UlongAttributeSet  = std::set<UlongAttributeType>;
+using StringAttributeSet = std::set<StringAttributeType>;
+using BoolAttributeSet   = std::bitset<MAX_BOOL_ATTRIBUTES>;
+
+struct Attributes
+{
+    BoolAttributeSet   boolAttributes{};
+    UlongAttributeSet  ulongAttributes{};
+    StringAttributeSet strAttributes{};
+};
+
+enum ObjectState
+{
+    NOT_IN_USE  = 0,
+    IN_USE      = 1,
+};
+
+struct ObjectParameters
+{
+    CK_SLOT_ID         slotId;
+    CK_SESSION_HANDLE  sessionHandle;
+    UlongAttributeSet  ulongAttributes;
+    StringAttributeSet strAttributes;
+    BoolAttributeSet   boolAttributes;
+    ObjectState        objectState;
+};
+
+enum class SessionState : CK_ULONG
+{
+    ROPublic = CKS_RO_PUBLIC_SESSION,
+    ROUser   = CKS_RO_USER_FUNCTIONS,
+    RWPublic = CKS_RW_PUBLIC_SESSION,
+    RWUser   = CKS_RW_USER_FUNCTIONS,
+    RWSO     = CKS_RW_SO_FUNCTIONS,
+    INVALID  = CKS_INVALID
+};
+
+enum class CurrentOperation
+{
+    None,
+    Encrypt,
+    Decrypt,
+    Sign,
+    Verify,
+    Hash
+};
+
+enum ActiveOp
+{
+    Encrypt_None    = 0x00,
+    AesEncrypt_Init = 0x01,
+    AesEncrypt      = 0x02,
+
+    Decrypt_None    = 0x03,
+    AesDecrypt_Init = 0x04,
+    AesDecrypt      = 0x05,
+
+    Sign_None       = 0x06,
+    Sign_Init       = 0x07,
+
+    Verify_None     = 0x08,
+    Verify_Init     = 0x09,
+
+    Hash_None       = 0x0a,
+    Hash_Init       = 0x0b,
+    Hash            = 0x0c,
+
+    RsaEncrypt_Init = 0x0d,
+    RsaDecrypt_Init = 0x0e,
+
+    FindObjects_None = 0x0f,
+
+    Max             = 0x10
+};
+
+struct CryptoParams
+{
+    BlockCipherMode blockCipherMode;
+    bool            padding;
+    uint32_t        keyHandle;
+    uint32_t        currentBufferSize;
+    uint32_t        tagBytes;
+
+    CryptoParams()
+    {
+        clear();
+    }
+
+    ~CryptoParams()
+    {
+        clear();
+    }
+
+    void clear()
+    {
+        blockCipherMode   = BlockCipherMode::unknown;
+        padding           = false;
+        keyHandle         = 0;
+        currentBufferSize = 0;
+        tagBytes          = 0;
+    }
+};
+
+struct HashParams
+{
+    HashMode hashMode;
+    uint32_t hashHandle;
+
+    HashParams()
+    {
+        clear();
+    }
+
+    ~HashParams()
+    {
+        clear();
+    }
+
+    void clear()
+    {
+        hashMode   = HashMode::invalid;
+        hashHandle = 0;
+    }
+};
+
+struct SignVerifyParams
+{
+    RsaPadding rsaPadding = RsaPadding::rsaNoPadding;
+    uint32_t   keyHandle  = 0;
+    HashMode   hashMode   = HashMode::invalid;
+
+    SignVerifyParams()
+    {
+        clear();
+    }
+
+    ~SignVerifyParams()
+    {
+        clear();
+    }
+
+    void clear()
+    {
+        rsaPadding = RsaPadding::rsaNoPadding;
+        keyHandle  = 0;
+        hashMode   = HashMode::invalid;
+    }
+};
+
+struct ActiveOperationData
+{
+    CryptoParams          encryptParams;
+    CryptoParams          decryptParams;
+    SignVerifyParams      signParams;
+    SignVerifyParams      verifyParams;
+    HashParams            hashParams;
+    std::vector<uint32_t> foHandles;
+};
+
+struct SessionParameters
+{
+    uint32_t              slotId;
+    SessionState          sessionState;
+    std::vector<uint32_t> sessionObjectHandles;
+    ActiveOperationData   data;
+    std::bitset<ActiveOp::Max> activeOperation;
+
+    SessionParameters()
+    {
+        slotId       = INVALID_SLOT_ID;
+        sessionState = SessionState::INVALID;
+
+        sessionObjectHandles.clear();
+
+        activeOperation.set(ActiveOp::Encrypt_None);
+        activeOperation.set(ActiveOp::Decrypt_None);
+        activeOperation.set(ActiveOp::Sign_None);
+        activeOperation.set(ActiveOp::Verify_None);
+        activeOperation.set(ActiveOp::Hash_None);
+        activeOperation.set(ActiveOp::FindObjects_None);
+    }
+};
+
+struct SymmetricKeyParams
+{
+    KeyGenerationMechanism  keyGenMechanism;
+    std::vector<uint8_t>    rawKeyBuffer;
+    uint32_t                keyLength;
+
+    SymmetricKeyParams()
+    {
+        clear();
+    }
+
+    ~SymmetricKeyParams()
+    {
+        clear();
+    }
+
+    void clear()
+    {
+        keyGenMechanism = KeyGenerationMechanism::invalid;
+        rawKeyBuffer.clear();
+        keyLength = 0;
+    }
+};
+
+struct AsymmetricKeyParams
+{
+    KeyGenerationMechanism  keyGenMechanism;
+    uint32_t                modulusLength;
+
+    AsymmetricKeyParams()
+    {
+        clear();
+    }
+
+    ~AsymmetricKeyParams()
+    {
+        clear();
+    }
+
+    void clear()
+    {
+        keyGenMechanism = KeyGenerationMechanism::invalid;
+        modulusLength = 0;
+    }
+};
+
+struct RsaCryptParams
+{
+    RsaPadding rsaPadding = RsaPadding::rsaNoPadding;
+};
+
+struct RsaEpidQuoteParams
+{
+    std::vector<uint8_t> sigRL;
+    std::vector<uint8_t> spid;
+    uint32_t             signatureType;
+
+    RsaEpidQuoteParams()
+    {
+        clear();
+    }
+
+    ~RsaEpidQuoteParams()
+    {
+        clear();
+    }
+
+    void clear()
+    {
+        signatureType = INVALID_SIGNATURE;
+        sigRL.clear();
+        spid.clear();
+    }
+};
+
+#ifdef DCAP_SUPPORT
+struct RsaEcdsaQuoteParams
+{
+    uint32_t qlPolicy;
+
+    RsaEcdsaQuoteParams()
+    {
+        reset();
+    }
+
+    ~RsaEcdsaQuoteParams()
+    {
+        reset();
+    }
+
+    void reset()
+    {
+        qlPolicy = SGX_QL_DEFAULT;
+    }
+};
+#endif
+
+struct AesCryptParams
+{
+    BlockCipherMode      cipherMode;
+    std::vector<uint8_t> iv;
+    int                  counterBits;
+    std::vector<uint8_t> aad;
+    uint32_t             tagBits;
+    bool                 padding;
+
+    AesCryptParams()
+    {
+        clear();
+    }
+
+    ~AesCryptParams()
+    {
+        clear();
+    }
+
+    void clear()
+    {
+        cipherMode  = BlockCipherMode::unknown;
+        padding     = false;
+        counterBits = 0;
+        tagBits     = 0;
+        aad.clear();
+        iv.clear();
+    }
+};
+
 #endif //CRYPTOENCLAVEDEFS_H
 

@@ -29,14 +29,7 @@
  *
  */
 
-#include <sgx_urts.h>
-#include <sgx_error.h>
-#include <sgx_uae_service.h>
-#include <map>
-
 #include "EnclaveHelpers.h"
-#include "CryptoEnclaveDefs.h"
-#include "p11Enclave_u.h"
 
 // Globals with file scope.
 namespace P11Crypto
@@ -60,10 +53,7 @@ namespace P11Crypto
                                                                             { SgxCryptStatus::SGX_CRYPT_STATUS_KEY_TABLE_FULL,            CKR_DEVICE_TABLE_FULL },
                                                                             { SgxCryptStatus::SGX_CRYPT_STATUS_HASH_STATE_TABLE_FULL,     CKR_DEVICE_TABLE_FULL },
                                                                             { SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED,   CKR_CIPHER_OPERATION_FAILED },
-                                                                            { SgxCryptStatus::SGX_CRYPT_STATUS_SEALED_DATA_FAILED,        CKR_PLATFORM_SEAL_UNSEAL_FAILED },
-                                                                            { SgxCryptStatus::SGX_CRYPT_STATUS_SESSION_EXISTS,            CKR_SESSION_EXISTS},
-                                                                            { SgxCryptStatus::SGX_CRYPT_STATUS_LOGGED_IN,                 CKR_LOGGED_IN},
-                                                                            { SgxCryptStatus::SGX_CRYPT_STATUS_NOT_LOGGED,                CKR_NOT_LOGGED} });
+                                                                            { SgxCryptStatus::SGX_CRYPT_STATUS_SEALED_DATA_FAILED,        CKR_PLATFORM_SEAL_UNSEAL_FAILED } });
 
     //---------------------------------------------------------------------------------------------
     EnclaveHelpers::EnclaveHelpers()
@@ -72,7 +62,7 @@ namespace P11Crypto
     }
 
     //---------------------------------------------------------------------------------------------
-    sgx_status_t EnclaveHelpers::loadSgxEnclave(ProviderType providerType)
+    sgx_status_t EnclaveHelpers::loadSgxEnclave()
     {
         sgx_launch_token_t token;
         sgx_status_t       sgxStatus        = sgx_status_t::SGX_ERROR_UNEXPECTED;
@@ -84,11 +74,7 @@ namespace P11Crypto
         if (isSgxEnclaveLoaded())
         {
             // The Intel SGX enclave is already loaded so return success.
-        #ifdef _WIN32
-            InterlockedIncrement(&mSgxEnclaveLoadedCount);
-        #else
             __sync_add_and_fetch(&mSgxEnclaveLoadedCount, 1);
-        #endif
             return SGX_SUCCESS;
         }
 
@@ -120,8 +106,7 @@ namespace P11Crypto
             while (sgxNumRetries <= mEnclaveInvalidId)
             {
                 sgxStatus = initCryptoEnclave(sgxEnclaveId,
-                                              reinterpret_cast<int32_t*>(&enclaveStatus),
-                                              static_cast<uint8_t>(providerType));
+                                              reinterpret_cast<int32_t*>(&enclaveStatus));
 
                 if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
                 {
@@ -138,11 +123,7 @@ namespace P11Crypto
             if (sgx_status_t::SGX_SUCCESS == sgxStatus)
             {
                 setSgxEnclaveId(sgxEnclaveId);
-            #ifdef _WIN32
-                InterlockedIncrement(&mSgxEnclaveLoadedCount);
-            #else
                 __sync_add_and_fetch(&mSgxEnclaveLoadedCount, 1);
-            #endif
             }
             else
             {
@@ -159,7 +140,7 @@ namespace P11Crypto
     } // end loadSgxEnclave()
 
     //---------------------------------------------------------------------------------------------
-    sgx_status_t EnclaveHelpers::unloadSgxEnclave(ProviderType providerType)
+    sgx_status_t EnclaveHelpers::unloadSgxEnclave()
     {
         sgx_status_t enclaveStatus  = SGX_ERROR_UNEXPECTED;
         sgx_status_t sgxStatus      = SGX_ERROR_UNEXPECTED;
@@ -171,15 +152,11 @@ namespace P11Crypto
                 sgxStatus = sgx_status_t::SGX_SUCCESS;
                 break;
             }
-            #ifdef _WIN32
-                InterlockedDecrement(&mSgxEnclaveLoadedCount);
-            #else
-                __sync_sub_and_fetch(&mSgxEnclaveLoadedCount, 1);
-            #endif
+
+            __sync_sub_and_fetch(&mSgxEnclaveLoadedCount, 1);
 
             (void)deinitCryptoEnclave(getSgxEnclaveId(),
-                                      reinterpret_cast<int32_t*>(&enclaveStatus),
-                                      static_cast<uint8_t>(providerType));
+                                      reinterpret_cast<int32_t*>(&enclaveStatus));
 
             // The Intel SGX enclave is already
             // in use so return success.
@@ -194,11 +171,7 @@ namespace P11Crypto
             if (sgx_status_t::SGX_SUCCESS == sgxStatus)
             {
                 setSgxEnclaveId(mEnclaveInvalidId);
-            #ifdef _WIN32
-                InterlockedExchange(&mSgxEnclaveLoadedCount, 0);
-            #else
                 __sync_lock_test_and_set(&mSgxEnclaveLoadedCount, 0);
-            #endif
             }
 
         } while (false);
@@ -211,9 +184,7 @@ namespace P11Crypto
     {
         CK_RV mappedStatus = CKR_FUNCTION_FAILED;
 
-        std::map<const SgxCryptStatus, const uint64_t>::iterator it;
-
-        it = enclaveToPkcs11ErrorMap.find(enclaveStatus);
+        auto it = enclaveToPkcs11ErrorMap.find(enclaveStatus);
         if (enclaveToPkcs11ErrorMap.end() == it)
         {
             mappedStatus = CKR_FUNCTION_FAILED;
