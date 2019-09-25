@@ -60,6 +60,11 @@ static const uint8_t  minPinLength               = 1;
 static const uint8_t  maxPinLength               = 255;
 static const uint8_t  maxSessionsSupported       = 100;
 static const uint8_t  maxRwSessionsSupported     = 100;
+static const uint8_t  tokenObjectFileNameLength  = 255;
+static const uint8_t  maxEcParamsLen             = 10;
+static const uint8_t  ed25519KeyLength           = 32;
+static const uint16_t minEcKeyLen                = 256;
+static const uint16_t maxEcKeyLen                = 384;
 
 static const std::string toolkitPath        = CRYPTOTOOLKIT_TOKENPATH;
 static const std::string tokenPath          = toolkitPath + "/tokens/";
@@ -109,7 +114,6 @@ enum class HashDigestLength
 enum class KeyWrapMode
 {
     raw,
-    platformBind,
     rsa,
     ctr,
     gcm,
@@ -147,6 +151,18 @@ enum class SgxMaxDataLimitsInBytes
     cipherTextSizeForGCM = 30 * 1024 * 1024
 };
 
+enum class KeyClassType : uint64_t
+{
+    Invalid       = 0,
+    Aes           = 1,
+    RsaPublicKey  = 2,
+    RsaPrivateKey = 3,
+    EcPublicKey   = 4,
+    EcPrivateKey  = 5,
+    EdPublicKey   = 6,
+    EdPrivateKey  = 7,
+};
+
 enum class RsaPadding
 {
     rsaPkcs1     = 1,
@@ -171,7 +187,9 @@ enum class KeyType : uint8_t
 {
     Invalid = 0,
     Aes     = 1,
-    Rsa     = 2
+    Rsa     = 2,
+    Ec      = 3,
+    Ed      = 4
 };
 
 enum class KeyGenerationMechanism
@@ -187,9 +205,10 @@ enum class KeyGenerationMechanism
     aesCBCPADUnwrapKey,
     rsaUnwrapKey,
     rsaImportPublicKey,
-    aesImportPbindKey,
-    rsaImportPbindPublicKey,
-    rsaImportPbindPrivateKey
+    ecGeneratePublicKey,
+    ecGeneratePrivateKey,
+    edGeneratePublicKey,
+    edGeneratePrivateKey
 };
 
 // SGX status Codes
@@ -211,26 +230,25 @@ enum class SgxCryptStatus
     SGX_CRYPT_STATUS_INVALID_TAG_SIZE,
     SGX_CRYPT_STATUS_INVALID_BUFFER_SIZE,
     SGX_CRYPT_STATUS_UNSUCCESSFUL
-
-
 };
 
 // Bool key attributes : Grows in power of 2.
 enum BoolAttribute
 {
-    ENCRYPT              = 1,
-    DECRYPT              = 2,
-    WRAP                 = 3,
-    UNWRAP               = 4,
-    SIGN                 = 5,
-    VERIFY               = 6,
-    TOKEN                = 7,
-    PRIVATE              = 8,
-    LOCAL                = 9,
-    MODIFIABLE           = 10,
-    DERIVE               = 11,
-    COPYABLE             = 12,
-    MAX_BOOL_ATTRIBUTES  = 13
+    ENCRYPT             = 1,
+    DECRYPT             = 2,
+    WRAP                = 3,
+    UNWRAP              = 4,
+    SIGN                = 5,
+    VERIFY              = 6,
+    TOKEN               = 7,
+    PRIVATE             = 8,
+    LOCAL               = 9,
+    MODIFIABLE          = 10,
+    DERIVE              = 11,
+    COPYABLE            = 12,
+    USED_FOR_WRAPPING   = 13,
+    MAX_BOOL_ATTRIBUTES = 14
 };
 
 using UlongAttributeType  = std::pair<CK_ULONG, CK_ULONG>;
@@ -318,6 +336,7 @@ struct CryptoParams
     uint32_t        keyHandle;
     uint32_t        currentBufferSize;
     uint32_t        tagBytes;
+    RsaPadding      rsaPadding;
 
     CryptoParams()
     {
@@ -336,6 +355,7 @@ struct CryptoParams
         keyHandle         = 0;
         currentBufferSize = 0;
         tagBytes          = 0;
+        rsaPadding        = RsaPadding::rsaNoPadding;
     }
 };
 
@@ -445,8 +465,9 @@ struct SymmetricKeyParams
 
 struct AsymmetricKeyParams
 {
-    KeyGenerationMechanism  keyGenMechanism;
-    uint32_t                modulusLength;
+    KeyGenerationMechanism keyGenMechanism;
+    uint32_t               modulusLength;
+    std::string            curveOid;
 
     AsymmetricKeyParams()
     {
@@ -462,6 +483,7 @@ struct AsymmetricKeyParams
     {
         keyGenMechanism = KeyGenerationMechanism::invalid;
         modulusLength = 0;
+        curveOid.clear();
     }
 };
 

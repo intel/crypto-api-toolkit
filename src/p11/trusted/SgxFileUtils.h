@@ -29,28 +29,37 @@
  *
  */
 
-#ifndef FILE_UTILS_H
-#define FILE_UTILS_H
+#ifndef SGX_FILE_UTILS_H
+#define SGX_FILE_UTILS_H
 
 #include <string>
-#include <fstream>
-#include <sstream>
-#include <sys/stat.h>
-
-#include <vector>
+#include <sgx_key.h>
+#include <sgx_error.h>
+#include <sgx_trts.h>
+#include <mbusafecrt.h>
+#include <sgx_tprotected_fs.h>
+#include "CryptoEnclaveDefs.h"
 
 namespace Utils
 {
-    namespace FileUtils
+    namespace SgxFileUtils
     {
-        bool isValid(const std::string& fileName);
+        std::string getTokenObjectPath(const uint64_t& slotId);
 
-        void deleteFile(const std::string& fileName);
+        SGX_FILE* open(const std::string& fileName, const std::string& mode);
 
-        bool writeData(const std::string& fileName, const std::stringstream& data);
+        bool write(const void* ptr, const size_t& size, const size_t& count, SGX_FILE* sgxFile);
 
-        std::stringstream readData(const std::string& fileName);
+        bool read(void* ptr, const size_t& size, const size_t& count, SGX_FILE* sgxFile);
+
+        bool close(SGX_FILE* sgxFile);
+
+        bool remove(const std::string& fileName);
+
+        bool seek(SGX_FILE* sgxFile, int64_t offset, int origin);
+
+        std::string generateRandomFilename();
     }
 }
 
-#endif //FILE_UTILS_H
+#endif // SGX_FILE_UTILS_H

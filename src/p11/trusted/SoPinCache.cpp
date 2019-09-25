@@ -29,83 +29,58 @@
  *
  */
 
-#include "SymmetricKeyCache.h"
+#include "SoPinCache.h"
 
 namespace CryptoSgx
 {
     //---------------------------------------------------------------------------------------------
-    SymmetricKeyCache::SymKeyData::SymKeyData()
-        : data({})
+    bool SoPinCache::find(const uint64_t slotId) const
     {
-
+        return (mCache.count(slotId) != 0);
     }
 
     //---------------------------------------------------------------------------------------------
-    SymmetricKeyCache::SymKeyData::SymKeyData(const SymmetricKey& key)
-        : data(key)
-    {
-
-    }
-
-    //---------------------------------------------------------------------------------------------
-    bool SymmetricKeyCache::find(const uint32_t keyId) const
-    {
-        return (mCache.count(keyId) != 0);
-    }
-
-    //---------------------------------------------------------------------------------------------
-    uint32_t SymmetricKeyCache::count() const
+    uint32_t SoPinCache::count() const
     {
         return mCache.size();
     }
 
     //---------------------------------------------------------------------------------------------
-    SymmetricKey SymmetricKeyCache::get(const uint32_t keyId) const
+    ByteBuffer SoPinCache::get(const uint64_t slotId) const
     {
-        SymmetricKey symKey{};
-        const auto iterator = mCache.find(keyId);
+        const auto iterator = mCache.find(slotId);
+        ByteBuffer pinMaterial;
 
         if (iterator != mCache.end())
         {
-            symKey.key               = iterator->second.data.key;
-            symKey.keyFile           = iterator->second.data.keyFile;
-            symKey.isUsedForWrapping = iterator->second.data.isUsedForWrapping;
+            pinMaterial = iterator->second;
         }
-        return symKey;
+
+        return pinMaterial;
     }
 
     //---------------------------------------------------------------------------------------------
-    void SymmetricKeyCache::add(const uint32_t keyId, const SymmetricKey& key)
+    void SoPinCache::add(const uint64_t slotId, const ByteBuffer& hashedSaltedPin)
     {
-        mCache[keyId] = key;
+        mCache[slotId] = hashedSaltedPin;
     }
 
     //---------------------------------------------------------------------------------------------
-    bool SymmetricKeyCache::remove(const uint32_t keyId, bool removeTokenFile)
+    bool SoPinCache::remove(const uint64_t slotId)
     {
-        const auto iterator = mCache.find(keyId);
-        auto retValue       = iterator != mCache.end();
+        const auto iterator = mCache.find(slotId);
+        auto retValue       = (iterator != mCache.end());
+
         if (retValue)
         {
-            if (removeTokenFile)
-            {
-                std::string filePath = iterator->second.data.keyFile;
-                if (!filePath.empty())
-                {
-                    if (!Utils::SgxFileUtils::remove(filePath))
-                    {
-                        return false;
-                    }
-                }
-            }
-
             mCache.erase(iterator);
         }
+
         return retValue;
     }
 
     //---------------------------------------------------------------------------------------------
-    void SymmetricKeyCache::clear()
+    void SoPinCache::clear()
     {
         mCache.clear();
     }

@@ -208,7 +208,7 @@ namespace Utils
         //---------------------------------------------------------------------------------------------
         CK_RV getRsaModulusExponent(const CK_OBJECT_HANDLE&  keyHandle,
                                     const CK_ATTRIBUTE_TYPE& attributeType,
-                                    const bool&              attributeValueNull,
+                                    const bool&              sizeRequest,
                                     std::string*             attributeValue,
                                     uint32_t*                attributeSize)
         {
@@ -248,7 +248,7 @@ namespace Utils
 
             *attributeSize = (CKA_MODULUS == attributeType) ? modulusSize : exponentSize;
 
-            if (attributeValueNull)
+            if (sizeRequest)
             {
                 return rv;
             }
@@ -282,6 +282,225 @@ namespace Utils
                     (*attributeValue).assign(reinterpret_cast<const char*>(destBuffer.data()), exponentSize);
                 }
             }
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV getEcParams(const CK_OBJECT_HANDLE&  keyHandle,
+                          const CK_ATTRIBUTE_TYPE& attributeType,
+                          const bool&              sizeRequest,
+                          std::string*             attributeValue,
+                          uint32_t*                attributeSize)
+        {
+            if (!attributeValue || !attributeSize)
+            {
+                return CKR_GENERAL_ERROR;
+            }
+
+            if ((CKA_EC_PARAMS != attributeType))
+            {
+                return CKR_ATTRIBUTE_TYPE_INVALID;
+            }
+
+            CK_RV          rv                    = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus             = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus         = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE;
+            uint32_t       destBufferLenRequired = 0;
+            P11Crypto::EnclaveHelpers enclaveHelpers;
+
+            sgxStatus = exportEcParams(enclaveHelpers.getSgxEnclaveId(),
+                                       reinterpret_cast<int32_t*>(&enclaveStatus),
+                                       keyHandle,
+                                       nullptr,
+                                       0,
+                                       &destBufferLenRequired);
+
+            rv = getPkcsStatus(sgxStatus, enclaveStatus);
+            if (CKR_OK != rv)
+            {
+                return rv;
+            }
+
+            *attributeSize = destBufferLenRequired;
+
+            if (sizeRequest)
+            {
+                return rv;
+            }
+
+            std::vector<uint8_t> destBuffer(destBufferLenRequired, 0);
+            destBufferLenRequired = 0;
+
+            sgxStatus = exportEcParams(enclaveHelpers.getSgxEnclaveId(),
+                                       reinterpret_cast<int32_t*>(&enclaveStatus),
+                                       keyHandle,
+                                       destBuffer.data(),
+                                       destBuffer.size(),
+                                       &destBufferLenRequired);
+
+            rv = getPkcsStatus(sgxStatus, enclaveStatus);
+
+            if (CKR_OK != rv)
+            {
+                *attributeSize = 0;
+            }
+            else
+            {
+                (*attributeValue).assign(reinterpret_cast<const char*>(destBuffer.data()), destBufferLenRequired);
+            }
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV readTokenObject(const std::string& tokenObjectFilePath,
+                              const CK_SLOT_ID&  slotID,
+                              uint64_t*          attributeBuffer,
+                              uint32_t           attributeBufferLen,
+                              uint64_t*          attributeBufferLenRequired,
+                              uint32_t*          keyHandle)
+        {
+            if (!keyHandle)
+            {
+                return CKR_ARGUMENTS_BAD;
+            }
+
+            CK_RV                     rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t              sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus            enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+            P11Crypto::EnclaveHelpers enclaveHelpers;
+
+            sgxStatus = readTokenObjectFile(enclaveHelpers.getSgxEnclaveId(),
+                                            reinterpret_cast<int32_t*>(&enclaveStatus),
+                                            tokenObjectFilePath.c_str(),
+                                            tokenObjectFilePath.size(),
+                                            static_cast<uint64_t>(slotID),
+                                            attributeBuffer,
+                                            attributeBufferLen,
+                                            attributeBufferLenRequired,
+                                            keyHandle);
+
+            rv = getPkcsStatus(sgxStatus, enclaveStatus);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV updateTokenObject(const uint32_t&              keyHandle,
+                                const CK_KEY_TYPE&           keyType,
+                                const std::vector<CK_ULONG>& packedAttributes)
+        {
+            if (!keyHandle)
+            {
+                return CKR_ARGUMENTS_BAD;
+            }
+
+            KeyType type = KeyType::Invalid;
+
+            if (CKK_AES == keyType)
+            {
+                type = KeyType::Aes;
+            }
+            else if (CKK_RSA == keyType)
+            {
+                type = KeyType::Rsa;
+            }
+            else if (CKK_EC == keyType)
+            {
+                type = KeyType::Ec;
+            }
+            else if (CKK_EC_EDWARDS == keyType)
+            {
+                type = KeyType::Ed;
+            }
+            else
+            {
+                return CKR_GENERAL_ERROR;
+            }
+
+            CK_RV                     rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t              sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus            enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+            P11Crypto::EnclaveHelpers enclaveHelpers;
+
+            sgxStatus = updateTokenObjectFile(enclaveHelpers.getSgxEnclaveId(),
+                                              reinterpret_cast<int32_t*>(&enclaveStatus),
+                                              keyHandle,
+                                              static_cast<uint8_t>(type),
+                                              packedAttributes.data(),
+                                              packedAttributes.size() * sizeof(CK_ULONG));
+
+            rv = getPkcsStatus(sgxStatus, enclaveStatus);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV updateSOPinMaterialInFile(const CK_SLOT_ID&  slotID,
+                                        const std::string& tokenObjectFilePath)
+        {
+            if (tokenObjectFilePath.empty())
+            {
+                return CKR_ARGUMENTS_BAD;
+            }
+
+            CK_RV                     rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t              sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus            enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+            P11Crypto::EnclaveHelpers enclaveHelpers;
+
+            sgxStatus = updateSOPinMaterial(enclaveHelpers.getSgxEnclaveId(),
+                                            reinterpret_cast<int32_t*>(&enclaveStatus),
+                                            static_cast<uint64_t>(slotID),
+                                            tokenObjectFilePath.c_str(),
+                                            tokenObjectFilePath.size());
+
+            rv = getPkcsStatus(sgxStatus, enclaveStatus);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV saveSoPinMaterial(const CK_SLOT_ID&  slotId,
+                                const std::string& sealedPin)
+        {
+            if (sealedPin.empty())
+            {
+                return CKR_ARGUMENTS_BAD;
+            }
+
+            CK_RV                     rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t              sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus            enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+            P11Crypto::EnclaveHelpers enclaveHelpers;
+
+            sgxStatus = savePinMaterial(enclaveHelpers.getSgxEnclaveId(),
+                                        reinterpret_cast<int32_t*>(&enclaveStatus),
+                                        slotId,
+                                        const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(sealedPin.data())),
+                                        sealedPin.size());
+
+            rv = getPkcsStatus(sgxStatus, enclaveStatus);
+
+            return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV updateObjectHandle(const uint32_t& keyHandle, const uint32_t& newKeyHandle, const KeyType& keyType)
+        {
+            CK_RV                     rv            = CKR_FUNCTION_FAILED;
+            sgx_status_t              sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus            enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+            P11Crypto::EnclaveHelpers enclaveHelpers;
+
+            sgxStatus = updateKeyHandle(enclaveHelpers.getSgxEnclaveId(),
+                                        reinterpret_cast<int32_t*>(&enclaveStatus),
+                                        keyHandle,
+                                        newKeyHandle,
+                                        static_cast<uint8_t>(keyType));
+
+            rv = getPkcsStatus(sgxStatus, enclaveStatus);
 
             return rv;
         }

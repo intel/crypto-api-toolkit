@@ -67,10 +67,14 @@ namespace CryptoSgx
 
         if (iterator != mCache.end())
         {
-            asymmetricKey.key                 = iterator->second.data.key;
-            asymmetricKey.pairKeyId           = iterator->second.data.pairKeyId;
-            asymmetricKey.isUsedForWrapping   = iterator->second.data.isUsedForWrapping;
+            asymmetricKey.key               = iterator->second.data.key;
+            asymmetricKey.keyFile           = iterator->second.data.keyFile;
+            asymmetricKey.ecKey             = iterator->second.data.ecKey;
+            asymmetricKey.edKey             = iterator->second.data.edKey;
+            asymmetricKey.isUsedForWrapping = iterator->second.data.isUsedForWrapping;
+            asymmetricKey.pairKeyId         = iterator->second.data.pairKeyId;
         }
+
         return asymmetricKey;
     }
 
@@ -81,13 +85,25 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
-    bool AsymmetricKeyCache::remove(const uint32_t& keyId)
+    bool AsymmetricKeyCache::remove(const uint32_t& keyId, bool removeTokenFile)
     {
         const auto  iterator = mCache.find(keyId);
         auto        result   = iterator != mCache.end();
 
         if (result)
         {
+            if (removeTokenFile)
+            {
+                std::string filePath = iterator->second.data.keyFile;
+                if (!filePath.empty())
+                {
+                    if (!Utils::SgxFileUtils::remove(filePath))
+                    {
+                        return false;
+                    }
+                }
+            }
+
             mCache.erase(iterator);
         }
         return result;
@@ -97,6 +113,68 @@ namespace CryptoSgx
     void AsymmetricKeyCache::clear()
     {
         mCache.clear();
+    }
+
+    //---------------------------------------------------------------------------------------------
+    bool AsymmetricKeyCache::isEcKey(const uint32_t& keyId) const
+    {
+        const auto iterator = mCache.find(keyId);
+
+        if (iterator != mCache.end())
+        {
+            if (iterator->second.data.ecKey)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    bool AsymmetricKeyCache::isRsaKey(const uint32_t& keyId) const
+    {
+        const auto iterator = mCache.find(keyId);
+
+        if (iterator != mCache.end())
+        {
+            if (iterator->second.data.key)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    bool AsymmetricKeyCache::isEdKey(const uint32_t& keyId) const
+    {
+        const auto iterator = mCache.find(keyId);
+
+        if (iterator != mCache.end())
+        {
+            if (iterator->second.data.edKey)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    uint32_t AsymmetricKeyCache::findKeyIdForPairKeyId(const unsigned long& pairKeyId) const
+    {
+        for (auto iter = mCache.begin(); iter != mCache.end(); ++iter)
+        {
+            if (pairKeyId == iter->second.data.pairKeyId)
+            {
+                return iter->first;
+            }
+        }
+
+        return 0;
     }
 
 } //CryptoSgx

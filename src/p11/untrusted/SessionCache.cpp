@@ -72,7 +72,7 @@ namespace P11Crypto
     CK_SLOT_ID SessionCache::getSlotId(const uint32_t& sessionHandle)
     {
         std::lock_guard<std::mutex> lockMutex(mCacheMutex);
-        uint32_t slotId = 0;
+        uint32_t slotId = maxSlotsSupported + 1;
 
         if (mCache.find(sessionHandle) != mCache.end())
         {
@@ -133,6 +133,7 @@ namespace P11Crypto
         std::lock_guard<std::mutex> lockMutex(mCacheMutex);
 
         SessionParameters sessionParameters{};
+        std::vector<uint32_t> newKeyHandlesinSessionParams;
 
         for (auto it : mCache)
         {
@@ -159,7 +160,6 @@ namespace P11Crypto
                     {
                         if (objectCache->privateObject(objectHandle))
                         {
-                            // Remove from enclave cache.
                             if (CKK_AES == objectCache->getKeyType(objectHandle))
                             {
                                 keyType = KeyType::Aes;
@@ -168,22 +168,58 @@ namespace P11Crypto
                             {
                                 keyType = KeyType::Rsa;
                             }
+                            else if (CKK_EC == objectCache->getKeyType(objectHandle))
+                            {
+                                keyType = KeyType::Ec;
+                            }
+                            else if (CKK_EC_EDWARDS == objectCache->getKeyType(objectHandle))
+                            {
+                                keyType = KeyType::Ed;
+                            }
 
-                            Utils::EnclaveUtils::destroyKey(objectHandle, keyType);
+                            if (objectCache->tokenObject(objectHandle))
+                            {
+                                uint32_t newKeyHandle = Utils::EnclaveUtils::generateRandom();
+                                if (!newKeyHandle)
+                                {
+                                    continue;
+                                }
 
+                                // Save the new key handles to be updated in session cache.
+                                newKeyHandlesinSessionParams.push_back(newKeyHandle);
+
+                                // Update new key handle in objectCache.
+                                objectCache->updateKeyHandle(objectHandle, newKeyHandle);
+
+                                Utils::EnclaveUtils::updateObjectHandle(objectHandle, newKeyHandle, keyType);
+                            }
+                            else
+                            {
+                                // Remove from enclave cache.
+                                Utils::EnclaveUtils::destroyKey(objectHandle, keyType);
+
+                                objectCache->remove(objectHandle);
+                            }
+
+                            // Remove from sessionObjectHandles vector.
                             auto sessObjIt = std::remove_if(sessionParameters.sessionObjectHandles.begin(),
                                                             sessionParameters.sessionObjectHandles.end(),
                                                             [=](const uint32_t& handle) { return (objectHandle == handle);});
 
                             sessionParameters.sessionObjectHandles.erase(sessObjIt, sessionParameters.sessionObjectHandles.end());
 
-                            objectCache->remove(objectHandle);
-
+                            // Remove from objectHandles vector.
                             auto objIt = std::remove_if(objectHandles.begin(),
                                                         objectHandles.end(),
                                                         [=](const uint32_t& handle) { return (objectHandle == handle);});
                             objectHandles.erase(objIt, objectHandles.end());
                         }
+                    }
+
+                    for (auto objectHandle : newKeyHandlesinSessionParams)
+                    {
+                        sessionParameters.sessionObjectHandles.push_back(objectHandle);
+                        objectHandles.push_back(objectHandle);
                     }
                 }
 
@@ -305,8 +341,8 @@ namespace P11Crypto
         const auto iterator = mSlotCache.find(id);
         if (mSlotCache.end() == iterator)
         {
-            LoginStatus loginStatus;
-            mSlotCache[id] = loginStatus;
+            SlotParameters slotParameters;
+            mSlotCache[id] = slotParameters;
         }
     }
 
@@ -401,6 +437,83 @@ namespace P11Crypto
     }
 
     //---------------------------------------------------------------------------------------------
+    static CK_RV updateAttributesInTokenFile(const CK_OBJECT_HANDLE& keyHandle,
+                                             const CK_KEY_TYPE&      keyType,
+                                             const ObjectParameters& objectParams)
+    {
+        CK_RV rv = CKR_FUNCTION_FAILED;
+
+        do
+        {
+            std::vector<CK_ULONG> packedAttributes;
+
+            if (!Utils::AttributeUtils::packAttributes(objectParams.slotId,
+                                                       objectParams.ulongAttributes,
+                                                       objectParams.strAttributes,
+                                                       objectParams.boolAttributes,
+                                                       &packedAttributes))
+            {
+                rv = CKR_GENERAL_ERROR;
+                break;
+            }
+
+            rv = Utils::EnclaveUtils::updateTokenObject(keyHandle, keyType, packedAttributes);
+            if (CKR_OK != rv)
+            {
+                break;
+            }
+
+        } while(false);
+
+        return rv;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    bool SessionCache::setWrappingStatus(const uint32_t& objectHandle)
+    {
+        std::lock_guard<std::mutex> lockMutex(mCacheMutex);
+
+        ObjectParameters objectParams;
+
+        objectCache->getObjectParams(objectHandle, &objectParams);
+
+        // Skip if wrapping status is already set.
+        if (objectParams.boolAttributes.test(BoolAttribute::USED_FOR_WRAPPING))
+        {
+            return true;
+        }
+
+        objectParams.boolAttributes.set(BoolAttribute::USED_FOR_WRAPPING);
+
+        if (objectParams.boolAttributes.test(BoolAttribute::TOKEN))
+        {
+            CK_KEY_TYPE keyType = objectCache->getKeyType(objectHandle);
+
+            CK_RV rv = updateAttributesInTokenFile(objectHandle, keyType, objectParams);
+            if (CKR_OK != rv)
+            {
+                return false;
+            }
+        }
+
+        objectCache->add(objectHandle, objectParams);
+
+        return true;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    bool SessionCache::checkWrappingStatus(const uint32_t& objectHandle)
+    {
+        std::lock_guard<std::mutex> lockMutex(mCacheMutex);
+
+        ObjectParameters objectParams;
+
+        objectCache->getObjectParams(objectHandle, &objectParams);
+
+        return objectParams.boolAttributes.test(BoolAttribute::USED_FOR_WRAPPING);
+    }
+
+    //---------------------------------------------------------------------------------------------
     bool SessionCache::closeSession(const uint32_t& sessionHandle)
     {
         std::lock_guard<std::mutex> lockMutex(mCacheMutex);
@@ -487,7 +600,11 @@ namespace P11Crypto
             }
         }
 
-        mSlotCache.clear();
+        auto slotIt = mSlotCache.find(slotId);
+        if (slotIt != mSlotCache.end())
+        {
+            mSlotCache.erase(slotIt);
+        }
 
         if (ulock.owns_lock())
         {
@@ -665,7 +782,7 @@ namespace P11Crypto
         std::vector<CK_SLOT_ID> slotIDs;
         slotIDs.resize(mSlotCache.size());
 
-        std::transform(mSlotCache.begin(), mSlotCache.end(), slotIDs.begin(), [](const std::pair<CK_SLOT_ID, LoginStatus>& it){return it.first;} );
+        std::transform(mSlotCache.begin(), mSlotCache.end(), slotIDs.begin(), [](const std::pair<CK_SLOT_ID, SlotParameters>& it){return it.first;} );
 
         return slotIDs;
     }
@@ -812,14 +929,14 @@ namespace P11Crypto
         const auto iterator = mSlotCache.find(slotId);
         if (iterator != mSlotCache.end())
         {
-            LoginStatus loginStatus = mSlotCache[slotId];
+            SlotParameters slotParameters = mSlotCache[slotId];
             if (CKU_SO == userType)
             {
-                return loginStatus.soLoggedIn;
+                return slotParameters.loginStatus.soLoggedIn;
             }
             else if (CKU_USER == userType)
             {
-                return loginStatus.userLoggedIn;
+                return slotParameters.loginStatus.userLoggedIn;
             }
         }
 
@@ -841,14 +958,14 @@ namespace P11Crypto
             return false;
         }
 
-        LoginStatus loginStatus = mSlotCache[slotId];
+        SlotParameters slotParameters = mSlotCache[slotId];
         switch(userType)
         {
             case CKU_SO:
-                loginStatus.soLoggedIn ? (result = false) : (loginStatus.soLoggedIn = true);
+                slotParameters.loginStatus.soLoggedIn ? (result = false) : (slotParameters.loginStatus.soLoggedIn = true);
                 break;
             case CKU_USER:
-                loginStatus.userLoggedIn ? (result = false) : (loginStatus.userLoggedIn = true);
+                slotParameters.loginStatus.userLoggedIn ? (result = false) : (slotParameters.loginStatus.userLoggedIn = true);
                 break;
             default:
                 result = false;
@@ -857,7 +974,7 @@ namespace P11Crypto
 
         if (result)
         {
-            mSlotCache[slotId] = loginStatus;
+            mSlotCache[slotId] = slotParameters;
             if (ulock.owns_lock())
             {
                 ulock.unlock();
@@ -902,14 +1019,15 @@ namespace P11Crypto
             return false;
         }
 
-        LoginStatus loginStatus = mSlotCache[slotId];
+        SlotParameters slotParameters = mSlotCache[slotId];
+
         switch(userType)
         {
             case CKU_SO:
-                (!loginStatus.soLoggedIn) ? (result = false) : (loginStatus.soLoggedIn = false);
+                (!slotParameters.loginStatus.soLoggedIn) ? (result = false) : (slotParameters.loginStatus.soLoggedIn = false);
                 break;
             case CKU_USER:
-                (!loginStatus.userLoggedIn) ? (result = false) : (loginStatus.userLoggedIn = false);
+                (!slotParameters.loginStatus.userLoggedIn) ? (result = false) : (slotParameters.loginStatus.userLoggedIn = false);
                 break;
             default:
                 result = false;
@@ -917,7 +1035,7 @@ namespace P11Crypto
 
         if (result)
         {
-            mSlotCache[slotId] = loginStatus;
+            mSlotCache[slotId] = slotParameters;
             if (ulock.owns_lock())
             {
                 ulock.unlock();
@@ -950,5 +1068,32 @@ namespace P11Crypto
         }
 
         return false;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    void SessionCache::updateTokenObjectStatus(const CK_SLOT_ID& slotId)
+    {
+        std::lock_guard<std::mutex> lockMutex(mCacheMutex);
+
+        SlotParameters slotParameters;
+        slotParameters.tokenObjectsLoaded = true;
+
+        mSlotCache[slotId] = slotParameters;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    bool SessionCache::tokenObjectsLoaded(const CK_SLOT_ID& slotId)
+    {
+        std::lock_guard<std::mutex> lockMutex(mCacheMutex);
+
+        const auto iterator = mSlotCache.find(slotId);
+        if (mSlotCache.end() == iterator)
+        {
+            return false;
+        }
+
+        SlotParameters slotParameters = iterator->second;
+        return slotParameters.tokenObjectsLoaded;
+
     }
 }

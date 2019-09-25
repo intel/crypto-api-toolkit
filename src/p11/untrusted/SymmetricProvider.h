@@ -50,9 +50,10 @@ namespace P11Crypto
          * @param   phKey        The symmetric key handle that points to the key generated.
          * @return  CK_RV        CKR_OK if operation is successful, error code otherwise.
          */
-        CK_RV generateAesKey(const SymmetricKeyParams& symKeyParams,
-                             const bool&               importKey,
-                             CK_OBJECT_HANDLE_PTR      phKey);
+        CK_RV generateAesKey(const SymmetricKeyParams&    symKeyParams,
+                             const bool&                  importKey,
+                             const std::vector<CK_ULONG>& packedAttributes,
+                             CK_OBJECT_HANDLE_PTR         phKey);
 
         //---------------------------------------------------------------------------------------------
         /**
@@ -152,20 +153,6 @@ namespace P11Crypto
 
         //---------------------------------------------------------------------------------------------
         /**
-        * Platform binds a symmetric key.
-        * @param    keyHandle                  The key handle of key that is to be platform bound.
-        * @param    destBuffer                 The destination buffer where the platform bound key buffer goes into.
-        * @param    destBufferLen              The length of destination buffer.
-        * @param    destBufferLenRequired      The length of destination buffer that will be required to hold the platform bound key.
-        * @return   CK_RV                      CKR_OK if operation is successful, error code otherwise.
-        */
-        CK_RV platformbindKey(const uint32_t& keyHandle,
-                              uint8_t*        destBuffer,
-                              const uint32_t& destBufferLen,
-                              uint32_t*       destBufferLenRequired);
-
-        //---------------------------------------------------------------------------------------------
-        /**
         * Unwraps a key with another key.
         * @param    unwrappingKeyHandle     The key handle of key that unwraps another key.
         * @param    sourceBuffer            The input buffer that contains the wrapped key.
@@ -175,24 +162,13 @@ namespace P11Crypto
         * @param    keyHandle               The key handle that points to the unwrapped key.
         * @return   CK_RV                   CKR_OK if operation is successful, error code otherwise.
         */
-        CK_RV unwrapKey(const uint32_t&       unwrappingKeyHandle,
-                        const uint8_t*        sourceBuffer,
-                        const uint32_t&       sourceBufferLen,
-                        const AesCryptParams& aesCryptParams,
-                        const KeyType&        wrappedKeyType,
-                        uint32_t*             keyHandle);
-
-        //---------------------------------------------------------------------------------------------
-        /**
-        * Imports a platform bound symmetric key.
-        * @param    sourceBuffer        The platform bound key.
-        * @param    sourceBufferLen     The length of platform bound key.
-        * @param    keyHandle           The key handle of key that will be associated with the imported platform bound key.
-        * @return   CK_RV               CKR_OK if operation is successful, error code otherwise.
-        */
-        CK_RV importPlatformBoundKey(const uint8_t*  sourceBuffer,
-                                     const uint32_t& sourceBufferLen,
-                                     uint32_t*       keyHandle);
+        CK_RV unwrapKey(const uint32_t&              unwrappingKeyHandle,
+                        const uint8_t*               sourceBuffer,
+                        const uint32_t&              sourceBufferLen,
+                        const AesCryptParams&        aesCryptParams,
+                        const KeyType&               wrappedKeyType,
+                        const std::vector<CK_ULONG>& packedAttributes,
+                        uint32_t*                    keyHandle);
     };
 }
 #endif //SYMMETRIC_CRYPTO_H

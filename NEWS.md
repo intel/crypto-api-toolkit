@@ -1,5 +1,27 @@
 # Crypto API Toolkit for Intel(R) SGX
 
+## Release v1.5
+
+### General
+This is the update to Crypto API Toolkit for Intel(R) SGX. This version supports:
+
+* Key generation, encryption and decryption for symmetric crypto algorithms AES-CTR, AES-GCM and AES-CBC (128/192/256 bit).
+* RSA key pair generation, encryption and decryption, sign and verify operation for RSA (1024/2048/3072/4096 bits).
+* EC and ED key pair generation, sign and verify(with a configure flag) for curves (NIST p-256, NIST p-384 and Ed25519).
+* Message digest generation (SHA-256 & SHA-512 and HMAC-SHA256 & HMAC-SHA512).
+* Support for wrapping and unwrapping symmetric keys with symmetric key and asymmetric key, unwrapping an asymmetric private key with a symmetric key, export and import of RSA public key.
+* Enclave quote generation with public key hash using EPID and ECDSA (DCAP) attestation primitives.
+
+This version has been built and validated on CentOS 7.5, Ubuntu Desktop & Server v18.04.
+
+## Known Issues & Limitations
+* For asymmetric mechanisms with PSS padding only SHA256 is supported.
+* CKU_CONTEXT_SPECIFIC user is not supported.
+* C_Initialize API does not accept application provided mutexes for locking. This API will fail if the CK_INITIALIZE_ARGS contain application provided mutexes.
+* C_Initialize does not support CK_INITIALIZE_ARGS with CKF_LIBRARY_CANT_CREATE_OS_THREADS set in flags member.
+* Support for multithreading will be enabled in a future release.
+* CKA_PRIVATE and CKA_TOKEN attributes can't be changed via C_SetAttributeValue.
+
 ## Release v1.4
 
 ### General

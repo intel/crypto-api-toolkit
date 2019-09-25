@@ -33,6 +33,7 @@
 #define KEYMANAGEMENT_H
 
 #include "config.h"
+#include "Slot.h"
 #include "p11Sgx.h"
 #include "p11Access.h"
 #include "AttributeUtils.h"
@@ -51,11 +52,9 @@ enum WrapMode
     Rsa        = 2,
     PublicKey  = 3,
     EpidQuote  = 4,
-    AesPBind   = 5,
-    RsaPBind   = 6,
-    AesWrapRsa = 7,
+    AesWrapRsa = 5,
 #ifdef DCAP_SUPPORT
-    EcdsaQuote = 8,
+    EcdsaQuote = 6,
 #endif
 };
 

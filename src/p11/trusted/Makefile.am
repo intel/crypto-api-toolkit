@@ -48,6 +48,10 @@ noinst_LTLIBRARIES = libp11SgxEnclave.la
 
 libp11SgxEnclave_la_SOURCES =  p11Enclave_t.h \
                                p11Enclave_t.c \
+                               SgxFileUtils.cpp \
+                               SgxFileUtils.h \
+                               TokenObjectParser.cpp \
+                               TokenObjectParser.h \
                                p11Enclave.cpp \
                                AsymmetricCrypto.cpp \
                                AsymmetricCrypto.h \
@@ -82,7 +86,9 @@ libp11SgxEnclave_la_SOURCES =  p11Enclave_t.h \
                                SymmetricCrypto.cpp \
                                SymmetricCrypto.h \
                                SymmetricKeyCache.cpp \
-                               SymmetricKeyCache.h
+                               SymmetricKeyCache.h \
+                               SoPinCache.cpp \
+                               SoPinCache.h
 
 p11Enclave_t.h: p11Enclave_t.c
 
@@ -93,7 +99,7 @@ all-local: libp11SgxEnclave.la
 	@echo "--------------------libp11SgxEnclave.la built-----------------------------"
 #   this is a workaround to relink the enclave because the linker flags for the enclave are not handled properly by libtool
 #	ls -laR ./.libs/
-	$(CXX) .libs/p11Enclave_t.o .libs/p11Enclave.o .libs/AsymmetricCrypto.o .libs/AsymmetricKeyCache.o .libs/ByteBuffer.o .libs/EVPContextHandle.o .libs/EVPCtxStateCache.o .libs/EVPDecrypt.o .libs/EVPEncrypt.o .libs/IppContextHandle.o .libs/IppDecrypt.o .libs/IppEncrypt.o .libs/IppStateCache.o .libs/HashCrypto.o .libs/HashStateCache.o .libs/IppHash.o .libs/SymmetricCrypto.o .libs/SymmetricKeyCache.o -m64 -Wall -O2 -D_FORTIFY_SOURCE=2 -Wl,--no-undefined -nostdlib -nodefaultlibs -nostartfiles -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now -pie -L/opt/intel/sgxssl/lib64 -Wl,--whole-archive -lsgx_tsgxssl -Wl,--no-whole-archive -lsgx_tsgxssl_crypto -L/opt/intel/sgxsdk/lib64 -Wl,--whole-archive -lsgx_trts -Wl,--no-whole-archive -Wl,--start-group -lsgx_tstdc -lsgx_tcxx -lsgx_tcrypto -lsgx_tservice -Wl,--end-group -Wl,-Bstatic -Wl,-Bsymbolic -Wl,--no-undefined -Wl,-pie,-eenclave_entry -Wl,--export-dynamic -Wl,--defsym,__ImageBase=0 -Wpragmas -Wl,-soname -Wl,libp11SgxEnclave.so.0 -o .libs/libp11SgxEnclave.so.0.0.0
+	$(CXX) .libs/p11Enclave_t.o .libs/p11Enclave.o .libs/SgxFileUtils.o .libs/TokenObjectParser.o .libs/SoPinCache.o .libs/AsymmetricCrypto.o .libs/AsymmetricKeyCache.o .libs/ByteBuffer.o .libs/EVPContextHandle.o .libs/EVPCtxStateCache.o .libs/EVPDecrypt.o .libs/EVPEncrypt.o .libs/IppContextHandle.o .libs/IppDecrypt.o .libs/IppEncrypt.o .libs/IppStateCache.o .libs/HashCrypto.o .libs/HashStateCache.o .libs/IppHash.o .libs/SymmetricCrypto.o .libs/SymmetricKeyCache.o -m64 -Wall -O2 -D_FORTIFY_SOURCE=2 -Wl,--no-undefined -nostdlib -nodefaultlibs -nostartfiles -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now -pie -L/opt/intel/sgxssl/lib64 -Wl,--whole-archive -lsgx_tsgxssl -Wl,--no-whole-archive -lsgx_tsgxssl_crypto -L/opt/intel/sgxsdk/lib64 -Wl,--whole-archive -lsgx_trts -Wl,--no-whole-archive -Wl,--start-group -lsgx_tstdc -lsgx_tcxx -lsgx_tcrypto -lsgx_tservice -lsgx_tprotected_fs -Wl,--end-group -Wl,-Bstatic -Wl,-Bsymbolic -Wl,--no-undefined -Wl,-pie,-eenclave_entry -Wl,--export-dynamic -Wl,--defsym,__ImageBase=0 -Wpragmas -Wl,-soname -Wl,libp11SgxEnclave.so.0 -o .libs/libp11SgxEnclave.so.0.0.0
 	@$(SGX_SIGN) sign -key $(srcdir)/../enclave_config/p11Enclave_private.pem -enclave ./.libs/libp11SgxEnclave.so.0.0.0 -out ./.libs/libp11SgxEnclave.signed.so -config $(srcdir)/../enclave_config/p11Enclave.config.xml
 	@echo "--------------------libp11SgxEnclave.signed.so built-----------------------------"
 

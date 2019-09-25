@@ -43,9 +43,11 @@ namespace P11Crypto
     namespace AsymmetricProvider
     {
         //---------------------------------------------------------------------------------------------
-        CK_RV generateRsaKeyPair(const AsymmetricKeyParams& asymKeyParams,
-                                 CK_OBJECT_HANDLE_PTR       phPublicKey,
-                                 CK_OBJECT_HANDLE_PTR       phPrivateKey)
+        CK_RV generateRsaKeyPair(const AsymmetricKeyParams&   asymKeyParams,
+                                 const std::vector<CK_ULONG>& packedAttributesPublic,
+                                 const std::vector<CK_ULONG>& packedAttributesPrivate,
+                                 CK_OBJECT_HANDLE_PTR         phPublicKey,
+                                 CK_OBJECT_HANDLE_PTR         phPrivateKey)
         {
             CK_RV          rv               = CKR_FUNCTION_FAILED;
             sgx_status_t   sgxStatus        = sgx_status_t::SGX_ERROR_UNEXPECTED;
@@ -66,7 +68,11 @@ namespace P11Crypto
                                                   reinterpret_cast<int32_t*>(&enclaveStatus),
                                                   &publicKeyHandle,
                                                   &privateKeyHandle,
-                                                  static_cast<uint16_t>(asymKeyParams.modulusLength));
+                                                  static_cast<uint16_t>(asymKeyParams.modulusLength),
+                                                  packedAttributesPublic.data(),
+                                                  packedAttributesPublic.size() * sizeof(CK_ULONG),
+                                                  packedAttributesPrivate.data(),
+                                                  packedAttributesPrivate.size() * sizeof(CK_ULONG));
 
                 rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
 
@@ -86,13 +92,15 @@ namespace P11Crypto
         }
 
         //---------------------------------------------------------------------------------------------
-        CK_RV importRsaPlatformBoundKey(const std::vector<uint8_t>& platformBoundKey,
-                                        CK_OBJECT_HANDLE_PTR        phPublicKey,
-                                        CK_OBJECT_HANDLE_PTR        phPrivateKey)
+        CK_RV generateEcc(const AsymmetricKeyParams&   asymKeyParams,
+                          const std::vector<CK_ULONG>& packedAttributesPublic,
+                          const std::vector<CK_ULONG>& packedAttributesPrivate,
+                          CK_OBJECT_HANDLE_PTR         phPublicKey,
+                          CK_OBJECT_HANDLE_PTR         phPrivateKey)
         {
-            CK_RV          rv            = CKR_FUNCTION_FAILED;
-            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
-            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+            CK_RV          rv               = CKR_FUNCTION_FAILED;
+            sgx_status_t   sgxStatus        = sgx_status_t::SGX_ERROR_UNEXPECTED;
+            SgxCryptStatus enclaveStatus    = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
             uint32_t       publicKeyHandle  = 0;
             uint32_t       privateKeyHandle = 0;
             EnclaveHelpers enclaveHelpers;
@@ -105,11 +113,16 @@ namespace P11Crypto
                     break;
                 }
 
-                sgxStatus = unsealAsymmetricKey(enclaveHelpers.getSgxEnclaveId(),
-                                                reinterpret_cast<int32_t*>(&enclaveStatus),
-                                                &publicKeyHandle,
-                                                &privateKeyHandle,
-                                                platformBoundKey.data(), platformBoundKey.size());
+                sgxStatus = generateEccKeyPair(enclaveHelpers.getSgxEnclaveId(),
+                                               reinterpret_cast<int32_t*>(&enclaveStatus),
+                                               &publicKeyHandle,
+                                               &privateKeyHandle,
+                                               reinterpret_cast<const unsigned char*>(asymKeyParams.curveOid.c_str()),
+                                               asymKeyParams.curveOid.size(),
+                                               packedAttributesPublic.data(),
+                                               packedAttributesPublic.size() * sizeof(CK_ULONG),
+                                               packedAttributesPrivate.data(),
+                                               packedAttributesPrivate.size() * sizeof(CK_ULONG));
 
                 rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
 
@@ -123,24 +136,23 @@ namespace P11Crypto
                     *phPublicKey  = CK_INVALID_HANDLE;
                     *phPrivateKey = CK_INVALID_HANDLE;
                 }
-
             } while (false);
 
             return rv;
         }
 
         //---------------------------------------------------------------------------------------------
-        CK_RV encrypt(const uint32_t& keyHandle,
-                      const uint8_t*  sourceBuffer,
-                      const uint32_t& sourceBufferLen,
-                      uint8_t*        destBuffer,
-                      const uint32_t& destBufferLen,
-                      uint32_t*       destBufferRequiredLength)
+        CK_RV encrypt(const uint32_t&   keyHandle,
+                      const uint8_t*    sourceBuffer,
+                      const uint32_t&   sourceBufferLen,
+                      uint8_t*          destBuffer,
+                      const uint32_t&   destBufferLen,
+                      uint32_t*         destBufferRequiredLength,
+                      const RsaPadding& rsaPadding)
         {
             CK_RV          rv              = CKR_FUNCTION_FAILED;
             sgx_status_t   sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
             SgxCryptStatus enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-            RsaPadding     paddingScheme   = RsaPadding::rsaPkcs1Oaep; // This is the only padding scheme supported.
             EnclaveHelpers enclaveHelpers;
 
             do
@@ -157,7 +169,7 @@ namespace P11Crypto
                                             sourceBuffer, sourceBufferLen,
                                             destBuffer,   destBufferLen,
                                             destBufferRequiredLength,
-                                            static_cast<uint8_t>(paddingScheme));
+                                            static_cast<uint8_t>(rsaPadding));
 
                 rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
 
@@ -166,18 +178,18 @@ namespace P11Crypto
             return rv;
         }
 
-        // //---------------------------------------------------------------------------------------------
-        CK_RV decrypt(const uint32_t& keyHandle,
-                      const uint8_t*  encryptedBuffer,
-                      const uint32_t& encryptedBufferLen,
-                      uint8_t*        destBuffer,
-                      const uint32_t& destBufferLen,
-                      uint32_t*       destBufferRequiredLength)
+        //---------------------------------------------------------------------------------------------
+        CK_RV decrypt(const uint32_t&   keyHandle,
+                      const uint8_t*    encryptedBuffer,
+                      const uint32_t&   encryptedBufferLen,
+                      uint8_t*          destBuffer,
+                      const uint32_t&   destBufferLen,
+                      uint32_t*         destBufferRequiredLength,
+                      const RsaPadding& rsaPadding)
         {
             CK_RV          rv            = CKR_FUNCTION_FAILED;
             sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
             SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-            RsaPadding     paddingScheme = RsaPadding::rsaPkcs1Oaep; // This is the only padding scheme supported.
             EnclaveHelpers enclaveHelpers;
 
             do
@@ -194,7 +206,7 @@ namespace P11Crypto
                                               encryptedBuffer, encryptedBufferLen,
                                               destBuffer, destBufferLen,
                                               destBufferRequiredLength,
-                                              static_cast<uint8_t>(paddingScheme));
+                                              static_cast<uint8_t>(rsaPadding));
 
                 rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
 
@@ -232,33 +244,6 @@ namespace P11Crypto
 
             return rv;
         }
-
-        //---------------------------------------------------------------------------------------------
-        CK_RV platformbindKey(const uint32_t& keyHandle,
-                              uint8_t*        destBuffer,
-                              const uint32_t& destBufferLen,
-                              uint32_t*       destBufferLenRequired)
-        {
-            CK_RV               rv              = CKR_FUNCTION_FAILED;
-            sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-            SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-            EnclaveHelpers      enclaveHelpers;
-
-            do
-            {
-                sgxStatus = platformBindAsymmetricKey(enclaveHelpers.getSgxEnclaveId(),
-                                                      reinterpret_cast<int32_t*>(&enclaveStatus),
-                                                      keyHandle,
-                                                      destBuffer, destBufferLen,
-                                                      destBufferLenRequired);
-
-                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
-
-            } while (false);
-
-            return rv;
-        }
-
 
         //---------------------------------------------------------------------------------------------
         CK_RV exportPublicKey(const uint32_t& keyHandle,
@@ -684,11 +669,12 @@ namespace P11Crypto
 #endif
 
         //---------------------------------------------------------------------------------------------
-        CK_RV unwrapKey(const uint32_t&       unwrappingKeyHandle,
-                        const uint8_t*        sourceBuffer,
-                        const uint32_t&       sourceBufferLen,
-                        const RsaCryptParams& rsaCryptParams,
-                        uint32_t*             keyHandle)
+        CK_RV unwrapKey(const uint32_t&              unwrappingKeyHandle,
+                        const uint8_t*               sourceBuffer,
+                        const uint32_t&              sourceBufferLen,
+                        const RsaCryptParams&        rsaCryptParams,
+                        const std::vector<CK_ULONG>& packedAttributes,
+                        uint32_t*                    keyHandle)
         {
             CK_RV          rv                 = CKR_FUNCTION_FAILED;
             sgx_status_t   sgxStatus          = sgx_status_t::SGX_ERROR_UNEXPECTED;
@@ -709,7 +695,9 @@ namespace P11Crypto
                                                     unwrappingKeyHandle,
                                                     &unwrappedKeyHandle,
                                                     sourceBuffer, sourceBufferLen,
-                                                    static_cast<uint8_t>(rsaCryptParams.rsaPadding));
+                                                    static_cast<uint8_t>(rsaCryptParams.rsaPadding),
+                                                    packedAttributes.data(),
+                                                    packedAttributes.size() * sizeof(CK_ULONG));
 
                 rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
 
@@ -726,9 +714,10 @@ namespace P11Crypto
         }
 
         //---------------------------------------------------------------------------------------------
-        CK_RV importKey(const uint8_t*  sourceBuffer,
-                        const uint32_t& sourceBufferLen,
-                        uint32_t*       keyHandle)
+        CK_RV importKey(const uint8_t*               sourceBuffer,
+                        const uint32_t&              sourceBufferLen,
+                        const std::vector<CK_ULONG>& packedAttributes,
+                        uint32_t*                    keyHandle)
         {
             CK_RV                    rv            = CKR_FUNCTION_FAILED;
             sgx_status_t             sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
@@ -760,7 +749,9 @@ namespace P11Crypto
                                                 reinterpret_cast<int32_t*>(&enclaveStatus),
                                                 keyHandle,
                                                 modulus.data(),  modulus.size(),
-                                                exponent.data(), exponent.size());
+                                                exponent.data(), exponent.size(),
+                                                packedAttributes.data(),
+                                                packedAttributes.size() * sizeof(CK_ULONG));
 
                 rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
 

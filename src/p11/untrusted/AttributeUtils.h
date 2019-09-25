@@ -56,7 +56,8 @@ namespace Utils
             RawKeyBuffer               = 2,
             ModulusBits                = 3,
             Local                      = 4,
-            AttrValidatorBoolParamsMax = 5
+            EcParams                   = 5,
+            AttrValidatorBoolParamsMax = 6
         };
 
         using BoolValAttributeType = std::bitset<AttrValidatorBoolParamsMax>;
@@ -92,7 +93,8 @@ namespace Utils
                                                    CKA_LABEL,             \
                                                    CKA_VALUE_KEY_BUFFER,  \
                                                    CKA_MODULUS,           \
-                                                   CKA_PUBLIC_EXPONENT    \
+                                                   CKA_PUBLIC_EXPONENT,   \
+                                                   CKA_EC_PARAMS          \
                                                  };
         static AttributeTypeSet supportedboolAttr {
                                                     CKA_ENCRYPT, CKA_DECRYPT,   \
@@ -134,10 +136,7 @@ namespace Utils
                                                                                                      { KeyGenerationMechanism::aesCBCUnwrapKey,          CKM_AES_CBC               },
                                                                                                      { KeyGenerationMechanism::aesCBCPADUnwrapKey,       CKM_AES_CBC_PAD           },
                                                                                                      { KeyGenerationMechanism::rsaUnwrapKey,             CKM_RSA_PKCS              },
-                                                                                                     { KeyGenerationMechanism::rsaImportPublicKey,       CKM_IMPORT_RSA_PUBLIC_KEY },
-                                                                                                     { KeyGenerationMechanism::aesImportPbindKey,        CKM_AES_PBIND             },
-                                                                                                     { KeyGenerationMechanism::rsaImportPbindPublicKey,  CKM_RSA_PBIND_IMPORT      },
-                                                                                                     { KeyGenerationMechanism::rsaImportPbindPrivateKey, CKM_RSA_PBIND_IMPORT      } });
+                                                                                                     { KeyGenerationMechanism::rsaImportPublicKey,       CKM_IMPORT_RSA_PUBLIC_KEY } });
 
         //---------------------------------------------------------------------------------------------
         auto isSupportedSymKeyLength = [](const uint32_t& keyLength) -> bool
@@ -227,6 +226,27 @@ namespace Utils
 
         //---------------------------------------------------------------------------------------------
         bool matchAttributes(const Attributes& attributes, const ObjectParameters& objectParams);
+
+        //---------------------------------------------------------------------------------------------
+        bool packAttributes(const CK_SLOT_ID&         slotId,
+                            const UlongAttributeSet&  ulongAttributes,
+                            const StringAttributeSet& strAttributes,
+                            const BoolAttributeSet&   boolAttributes,
+                            std::vector<ulong>*       packedAttributes);
+
+        //---------------------------------------------------------------------------------------------
+        bool unpackAttributes(std::vector<ulong>& packedAttributes,
+                              UlongAttributeSet*    ulongAttributes,
+                              StringAttributeSet*   strAttributes,
+                              BoolAttributeSet*     boolAttributes);
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV getEcKeyGenParameters(const StringAttributeSet& strAttributes, AsymmetricKeyParams* asymKeyParams);
+
+        //---------------------------------------------------------------------------------------------
+        bool validateEcKeyGenAttributes(const KeyGenerationMechanism&   keyGenMechanism,
+                                        const AttributeValidatorStruct& attrValStruct,
+                                        const BoolAttributeSet&         boolAttributes);
     }
 }
 

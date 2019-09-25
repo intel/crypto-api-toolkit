@@ -35,6 +35,7 @@
 #include <map>
 
 #include "ByteBuffer.h"
+#include "SgxFileUtils.h"
 
 namespace CryptoSgx
 {
@@ -44,7 +45,7 @@ namespace CryptoSgx
     struct SymmetricKey
     {
         ByteBuffer  key;
-        bool        isPlatformBound   = false;
+        std::string keyFile;
         bool        isUsedForWrapping = false;
     };
 
@@ -80,7 +81,7 @@ namespace CryptoSgx
          * @param  keyId    The key Id to be found.
          * @return          True if success, false otherwise.
          */
-        bool remove(const uint32_t keyId);
+        bool remove(const uint32_t keyId, bool removeTokenFile = true);
 
         /**
          * Clears all the keys.

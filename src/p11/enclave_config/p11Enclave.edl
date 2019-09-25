@@ -34,6 +34,7 @@ enclave {
     from "sgx_tsgxssl.edl" import *; /* Libraries for OpenSSL use in the enclave */
     from "sgx_tstdc.edl" import *; /* Libraries for OpenSSL use in the enclave */
     from "sgx_tae_service.edl" import *;
+    from "sgx_tprotected_fs.edl" import *;
 
     include "../include/Constants.h"
     include "sgx_key.h"
@@ -63,12 +64,16 @@ enclave {
         public SgxStatus destroyHashState(uint32_t hashId);
 
         // Symmetric Crypto
-        public SgxStatus generateSymmetricKey([user_check] uint32_t*    keyId,
-                                              uint16_t                  symmetricKeyLen);
+        public SgxStatus generateSymmetricKey([user_check] uint32_t*                         keyId,
+                                              uint16_t                                       symmetricKeyLen,
+                                              [in, size = attributeBufferLen]const uint64_t* attributeBuffer,
+                                              uint64_t                                       attributeBufferLen);
 
-        public SgxStatus importSymmetricKey([user_check] uint32_t*                       keyId,
-                                            [in, size = symmetricKeyLen] const uint8_t*  keyBuffer,
-                                            uint16_t                                     symmetricKeyLen);
+        public SgxStatus importSymmetricKey([user_check] uint32_t*                         keyId,
+                                            [in, size = symmetricKeyLen] const uint8_t*    keyBuffer,
+                                            uint16_t                                       symmetricKeyLen,
+                                            [in, size = attributeBufferLen]const uint64_t* attributeBuffer,
+                                            uint64_t                                       attributeBufferLen);
 
         public SgxStatus symmetricEncryptInit(uint32_t                            keyId,
                                               [in, size = ivSize] const uint8_t*  iv,
@@ -129,9 +134,13 @@ enclave {
         public SgxStatus destroyKey(uint32_t keyId, uint8_t keyType);
 
         // Asymmetric Crypto
-        public SgxStatus generateAsymmetricKey([user_check] uint32_t*   publicKeyId,
-                                               [user_check] uint32_t*   privateKeyId,
-                                               uint16_t                 modulusSize);
+        public SgxStatus generateAsymmetricKey([user_check] uint32_t*                                publicKeyId,
+                                               [user_check] uint32_t*                                privateKeyId,
+                                               uint16_t                                              modulusSize,
+                                               [in, size = attributeBufferPublicLen]const uint64_t*  attributeBufferPublic,
+                                               uint64_t                                              attributeBufferPublicLen,
+                                               [in, size = attributeBufferPrivateLen]const uint64_t* attributeBufferPrivate,
+                                               uint64_t                                              attributeBufferPrivateLen);
 
         public SgxStatus asymmetricEncrypt(uint32_t                            keyId,
                                            [user_check] const uint8_t*         sourceBuffer,
@@ -186,38 +195,21 @@ enclave {
                                                           uint32_t                            destBufferLen,
                                                           [user_check] uint32_t*              destBufferWritten);
 
-        public SgxStatus unwrapWithSymmetricKey(uint32_t                            keyId,
-                                                [user_check] uint32_t*              unwrappedKeyId,
-                                                [user_check] const uint8_t*         sourceBuffer,
-                                                uint32_t                            sourceBufferLen,
-                                                [in, size = ivSize] const uint8_t*  iv,
-                                                uint32_t                            ivSize,
-                                                [in, size = aadSize] const uint8_t* aad,
-                                                uint32_t                            aadSize,
-                                                uint8_t                             cipherMode,
-                                                int                                 padding,
-                                                uint32_t                            tagBits,
-                                                int                                 counterBits,
-                                                uint8_t                             wrappedKeyType);
-
-        public SgxStatus platformBindSymmetricKey(uint32_t                              keyId,
-                                                  [out, size = destBufferLen] uint8_t*  destBuffer,
-                                                  uint32_t                              destBufferLen,
-                                                  [user_check] uint32_t*                destBufferWritten);
-
-        public SgxStatus unwrapAndImportPlatformBoundSymmetricKey([user_check] uint32_t*                      keyId,
-                                                                  [in, size = sourceBufferLen] const uint8_t* sourceBuffer,
-                                                                  uint32_t                                    sourceBufferLen);
-
-        public SgxStatus platformBindAsymmetricKey(uint32_t                             keyId,
-                                                   [out, size = destBufferLen] uint8_t* destBuffer,
-                                                   uint32_t                             destBufferLen,
-                                                   [user_check] uint32_t*               destBufferWritten);
-
-        public SgxStatus unsealAsymmetricKey([user_check] uint32_t*                      publicKeyId,
-                                             [user_check] uint32_t*                      privateKeyId,
-                                             [in, size = sourceBufferLen] const uint8_t* sourceBuffer,
-                                             uint32_t                                    sourceBufferLen);
+        public SgxStatus unwrapWithSymmetricKey(uint32_t                                       keyId,
+                                                [user_check] uint32_t*                         unwrappedKeyId,
+                                                [user_check] const uint8_t*                    sourceBuffer,
+                                                uint32_t                                       sourceBufferLen,
+                                                [in, size = ivSize] const uint8_t*             iv,
+                                                uint32_t                                       ivSize,
+                                                [in, size = aadSize] const uint8_t*            aad,
+                                                uint32_t                                       aadSize,
+                                                uint8_t                                        cipherMode,
+                                                int                                            padding,
+                                                uint32_t                                       tagBits,
+                                                int                                            counterBits,
+                                                uint8_t                                        wrappedKeyType,
+                                                [in, size = attributeBufferLen]const uint64_t* attributeBuffer,
+                                                uint64_t                                       attributeBufferLen);
 
         public SgxStatus wrapWithAsymmetricKey(uint32_t               asymmetricKeyId,
                                                uint32_t               symmetricKeyId,
@@ -226,11 +218,13 @@ enclave {
                                                [user_check] uint32_t* destBufferWritten,
                                                uint8_t                rsaPadding);
 
-        public SgxStatus unwrapWithAsymmetricKey(uint32_t                    asymmetricKeyId,
-                                                 [user_check] uint32_t*      unwrappedKeyId,
-                                                 [user_check] const uint8_t* sourceBuffer,
-                                                 uint32_t                    sourceBufferLen,
-                                                 uint8_t                     rsaPadding);
+        public SgxStatus unwrapWithAsymmetricKey(uint32_t                                       asymmetricKeyId,
+                                                 [user_check] uint32_t*                         unwrappedKeyId,
+                                                 [user_check] const uint8_t*                    sourceBuffer,
+                                                 uint32_t                                       sourceBufferLen,
+                                                 uint8_t                                        rsaPadding,
+                                                 [in, size = attributeBufferLen]const uint64_t* attributeBuffer,
+                                                 uint64_t                                       attributeBufferLen);
 
         public SgxStatus asymmetricExportKey(uint32_t               keyId,
                                              [user_check] uint8_t*  destBuffer,
@@ -239,11 +233,13 @@ enclave {
                                              [user_check] uint32_t* modulusSize,
                                              [user_check] uint32_t* exponentSize);
 
-        public SgxStatus asymmetricImportKey([user_check] uint32_t* keyId,
-                                             [user_check] uint8_t*  modulusBuffer,
-                                             uint32_t               modulusBufferLen,
-                                             [user_check] uint8_t*  exponentBuffer,
-                                             uint32_t               exponentBufferLen);
+        public SgxStatus asymmetricImportKey([user_check] uint32_t*                         keyId,
+                                             [user_check] uint8_t*                          modulusBuffer,
+                                             uint32_t                                       modulusBufferLen,
+                                             [user_check] uint8_t*                          exponentBuffer,
+                                             uint32_t                                       exponentBufferLen,
+                                             [in, size = attributeBufferLen]const uint64_t* attributeBuffer,
+                                             uint64_t                                       attributeBufferLen);
 
         public SgxStatus createReportForKeyHandle(uint32_t                keyId,
                                                   [in] sgx_target_info_t* pTargetInfo,
@@ -267,6 +263,44 @@ enclave {
                                      uint32_t                            sealedPinLen);
 
         public SgxStatus clearCacheState(uint32_t keyId);
+
+        public SgxStatus readTokenObjectFile([in, size = filePathLen] const char*       filePath,
+                                             uint32_t                                   filePathLen,
+                                             uint64_t                                   slotId,
+                                             [out, size = attributeBufferLen] uint64_t* attributeBuffer,
+                                             uint64_t                                   attributeBufferLen,
+                                             [user_check] uint64_t*                     attributeBufferLenRequired,
+                                             [user_check] uint32_t*                     keyId);
+
+
+        public SgxStatus updateTokenObjectFile(uint32_t                                       keyId,
+                                               uint8_t                                        keyType,
+                                               [in, size = attributeBufferLen]const uint64_t* attributeBuffer,
+                                               uint64_t                                       attributeBufferLen);
+
+        public SgxStatus updateSOPinMaterial(uint64_t                             slotId,
+                                             [in, size = filePathLen] const char* filePath,
+                                             uint32_t                             filePathLen);
+
+        public SgxStatus savePinMaterial(uint64_t                           slotId,
+                                         [in, size = sealedPinLen] uint8_t* sealedPin,
+                                         uint32_t                           sealedPinLen);
+
+        public SgxStatus updateKeyHandle(uint32_t keyHandle, uint32_t newKeyHandle, uint8_t keyType);
+
+        public SgxStatus generateEccKeyPair([user_check] uint32_t*                                publicKeyId,
+                                            [user_check] uint32_t*                                privateKeyId,
+                                            [in, size = curveOidLen] const unsigned char*         curveOid,
+                                            uint32_t                                              curveOidLen,
+                                            [in, size = attributeBufferPublicLen]const uint64_t*  attributeBufferPublic,
+                                            uint64_t                                              attributeBufferPublicLen,
+                                            [in, size = attributeBufferPrivateLen]const uint64_t* attributeBufferPrivate,
+                                            uint64_t                                              attributeBufferPrivateLen);
+
+        public SgxStatus exportEcParams(uint32_t               keyId,
+                                        [user_check] uint8_t*  destBuffer,
+                                        uint32_t               destBufferLen,
+                                        [user_check] uint32_t* destBufferWritten);
     };
 
     untrusted

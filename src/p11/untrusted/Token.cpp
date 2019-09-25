@@ -38,8 +38,12 @@ namespace P11Crypto
     Token::Token(const CK_SLOT_ID& slotID)
     {
         this->slotID = slotID;
-        tokenFile    = tokenPath + "slot" + std::to_string(slotID) + ".token";
-        isValid      = true;
+
+        std::string slotFolder    = "slot" + std::to_string(slotID);
+        std::string tokenFileName = slotFolder + ".token";
+
+        tokenFile = tokenPath + "/" + slotFolder + "/" + tokenFileName;
+        isValid   = true;
         tokenData.clear();
     }
 
@@ -66,6 +70,27 @@ namespace P11Crypto
     }
 
     //---------------------------------------------------------------------------------------------
+    static bool createDirectory(const std::string& folderPath)
+    {
+        struct stat info;
+
+        if (stat(folderPath.c_str(), &info) != 0)
+        {
+            int retValue = mkdir(folderPath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+            if (-1 == retValue)
+            {
+                return false;
+            }
+        }
+        else if(!(info.st_mode & S_IFDIR))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    //---------------------------------------------------------------------------------------------
     CK_RV Token::initToken(const CK_UTF8CHAR_PTR pin, const CK_ULONG& pinLength, const CK_UTF8CHAR_PTR label)
     {
         CK_RV rv               = CKR_FUNCTION_FAILED;
@@ -83,6 +108,23 @@ namespace P11Crypto
                 strnlen(reinterpret_cast<const char*>(label), labelSize) != labelSize)
             {
                 rv = CKR_ARGUMENTS_BAD;
+                break;
+            }
+
+            // Create a directory(if not already present) for storing token objects in current slot.
+            std::string folderPath = tokenPath + "slot" + std::to_string(slotID);
+
+            if (!createDirectory(folderPath))
+            {
+                rv = CKR_GENERAL_ERROR;
+                break;
+            }
+
+            folderPath += "/.tokenObjects";
+
+            if (!createDirectory(folderPath))
+            {
+                rv = CKR_GENERAL_ERROR;
                 break;
             }
 
@@ -110,22 +152,33 @@ namespace P11Crypto
                     break;
                 }
             }
-
-            std::string sealedSoPin, sealedLoginStatus;
-
-            bool sealPin = true;
-            sealedSoPin = Utils::EnclaveUtils::sealDataBlob(soPin, sealPin);
-            if (sealedSoPin.empty())
+            else
             {
-                rv = CKR_GENERAL_ERROR;
+                std::string sealedSoPin;
+
+                bool sealPin = true;
+                sealedSoPin = Utils::EnclaveUtils::sealDataBlob(soPin, sealPin);
+                if (sealedSoPin.empty())
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
+
+                tokenData.soPin  = sealedSoPin;
+            }
+
+            // Update pin material in enclave cache.
+            rv = Utils::EnclaveUtils::saveSoPinMaterial(this->slotID, tokenData.soPin);
+            if (CKR_OK != rv)
+            {
                 break;
             }
 
             // A userPin once initialized for a token in a slot, will stay persistent through multiple C_InitToken calls.
             // In such cases, tokenData.userPin would already contain userPin by this point.
+
             tokenData.slotId = slotID;
             tokenData.label  = labelString;
-            tokenData.soPin  = sealedSoPin;
 
             if (tokenFilePresent)
             {
@@ -202,10 +255,10 @@ namespace P11Crypto
         tokenInfo->ulTotalPrivateMemory = CK_UNAVAILABLE_INFORMATION;
         tokenInfo->ulFreePrivateMemory  = CK_UNAVAILABLE_INFORMATION;
 
-        // Crypto API Toolkit release version is 1.4
+        // Crypto API Toolkit release version is 1.5
         // SGX SDK version is 2.5
         tokenInfo->hardwareVersion.major = 1;
-        tokenInfo->hardwareVersion.minor = 4;
+        tokenInfo->hardwareVersion.minor = 5;
         tokenInfo->firmwareVersion.major = 2;
         tokenInfo->firmwareVersion.minor = 5;
 
@@ -442,5 +495,16 @@ namespace P11Crypto
         }
 
         return CKR_OK;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    std::string Token::getSOPinMaterial()
+    {
+        if (!tokenDataLoaded)
+        {
+            loadTokenData();
+        }
+
+        return tokenData.soPin;
     }
 }

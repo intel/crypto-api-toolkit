@@ -32,6 +32,137 @@
 #include "SessionManagement.h"
 
 //---------------------------------------------------------------------------------------------
+static std::string getSOPinMaterial(const CK_SLOT_ID& slotId)
+{
+    std::string soPinMaterial;
+
+    P11Crypto::Slot slot(slotId);
+    if (!slot.valid())
+    {
+        return soPinMaterial;
+    }
+
+    P11Crypto::Token* token = slot.getToken();
+    if (!token)
+    {
+        return soPinMaterial;
+    }
+
+    soPinMaterial = token->getSOPinMaterial();
+
+    return soPinMaterial;
+}
+
+//---------------------------------------------------------------------------------------------
+static CK_RV loadTokenObjects(const CK_SLOT_ID& slotID, const CK_SESSION_HANDLE& sessionId)
+{
+    CK_RV rv = CKR_OK;
+
+    do
+    {
+        std::string tokenFolderPath = tokenPath + "/" + "slot" + std::to_string(slotID) + "/.tokenObjects";
+        std::string fileName, tokenObjectFilePath, soPinMaterial;
+        uint32_t    keyHandle = 0;
+        DIR*        dir       = nullptr;
+
+        soPinMaterial = getSOPinMaterial(slotID);
+        if (soPinMaterial.empty())
+        {
+            break;
+        }
+
+        rv = Utils::EnclaveUtils::saveSoPinMaterial(slotID, soPinMaterial);
+        if (CKR_OK != rv)
+        {
+            break;
+        }
+
+        dir = opendir(tokenFolderPath.c_str());
+        if (!dir)
+        {
+            rv = CKR_GENERAL_ERROR;
+            break;
+        }
+
+        struct dirent* entry = nullptr;
+
+        while (entry = readdir(dir))
+        {
+            if (!std::strcmp(entry->d_name, ".") ||
+                !std::strcmp(entry->d_name, ".."))
+            {
+                continue;
+            }
+
+            keyHandle = 0;
+
+            fileName.clear();
+            fileName = entry->d_name;
+
+            tokenObjectFilePath.clear();
+            tokenObjectFilePath = tokenFolderPath + "/" + fileName;
+
+            std::vector<uint64_t> packedAttributes;
+            uint64_t attributeBufferLenRequired = 0;
+
+            rv = Utils::EnclaveUtils::readTokenObject(tokenObjectFilePath,
+                                                      slotID,
+                                                      nullptr, 0,
+                                                      &attributeBufferLenRequired, &keyHandle);
+            if (CKR_OK != rv)
+            {
+                break;
+            }
+
+            if (0 != (attributeBufferLenRequired % sizeof(CK_ULONG)))
+            {
+                rv = CKR_GENERAL_ERROR;
+                break;
+            }
+
+            attributeBufferLenRequired = attributeBufferLenRequired / (sizeof(CK_ULONG));
+
+            packedAttributes.resize(attributeBufferLenRequired);
+
+            rv = Utils::EnclaveUtils::readTokenObject(tokenObjectFilePath,
+                                                      slotID,
+                                                      packedAttributes.data(), packedAttributes.size() * sizeof(CK_ULONG),
+                                                      &attributeBufferLenRequired, &keyHandle);
+            if (CKR_OK != rv)
+            {
+                break;
+            }
+
+            UlongAttributeSet  ulongAttributes;
+            StringAttributeSet strAttributes;
+            BoolAttributeSet   boolAttributes;
+
+            if (!Utils::AttributeUtils::unpackAttributes(packedAttributes, &ulongAttributes, &strAttributes, &boolAttributes))
+            {
+                rv = CKR_GENERAL_ERROR;
+                break;
+            }
+
+            ObjectParameters objectParams {};
+
+            objectParams.slotId          = slotID;
+            objectParams.sessionHandle   = sessionId;
+            objectParams.ulongAttributes = ulongAttributes;
+            objectParams.strAttributes   = strAttributes;
+            objectParams.boolAttributes  = boolAttributes;
+            objectParams.objectState     = ObjectState::NOT_IN_USE;
+
+            gSessionCache->addObject(sessionId, keyHandle, objectParams);
+        }
+
+        closedir(dir);
+
+    } while(false);
+
+    return rv;
+}
+
+//---------------------------------------------------------------------------------------------
 CK_RV openSession(const CK_SLOT_ID&     slotID,
                   const CK_FLAGS&       flags,
                   CK_VOID_PTR           pApplication,
@@ -85,11 +216,23 @@ CK_RV openSession(const CK_SLOT_ID&     slotID,
         uint32_t sessionId = 0;
 
         rv = gSessionCache->createSession(slotID, flags, &sessionId);
-
         if (CKR_OK == rv)
         {
             *phSession = sessionId;
         }
+
+        if (!gSessionCache->tokenObjectsLoaded(slotID))
+        {
+            rv = loadTokenObjects(slotID, sessionId);
+            if (CKR_OK != rv)
+            {
+                gSessionCache->closeSession(sessionId);
+                break;
+            }
+
+            gSessionCache->updateTokenObjectStatus(slotID);
+        }
+
     } while (false);
 
     return rv;

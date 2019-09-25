@@ -165,4 +165,22 @@ namespace P11Crypto
 
         return false;
     }
+
+    //---------------------------------------------------------------------------------------------
+    bool ObjectCache::updateKeyHandle(const uint32_t& objectHandle, const uint32_t& newKeyHandle)
+    {
+        std::lock_guard<std::mutex> lockMutex(mCacheMutex);
+
+        auto it = mCache.find(objectHandle);
+        if (mCache.end() != it)
+        {
+            ObjectParameters objectParams = mCache[objectHandle];
+
+            mCache.erase(it);
+
+            mCache[newKeyHandle] = objectParams;
+        }
+
+        return false;
+    }
 }

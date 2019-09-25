@@ -34,6 +34,7 @@
 
 #include "ByteBuffer.h"
 #include "CryptoEnclaveDefs.h"
+#include "SgxFileUtils.h"
 
 #include <map>
 #include <openssl/rsa.h>
@@ -45,9 +46,12 @@ namespace CryptoSgx
      */
     struct AsymmetricKey
     {
-        uint32_t    pairKeyId{0};
-        bool        isUsedForWrapping = false;
-        RSA*        key{nullptr};
+        RSA*            key{nullptr};
+        std::string     keyFile;
+        EC_KEY*         ecKey{nullptr};
+        EVP_PKEY*       edKey{nullptr};
+        bool            isUsedForWrapping = false;
+        unsigned long   pairKeyId = 0;
     };
 
     /**
@@ -82,7 +86,7 @@ namespace CryptoSgx
          * @param   keyId   The keyId
          * @return          True if success, false otherwise.
          */
-        bool remove(const uint32_t& keyId);
+        bool remove(const uint32_t& keyId, bool removeTokenFile = true);
 
         /**
          * Clears all the keys.
@@ -93,6 +97,14 @@ namespace CryptoSgx
          * Returns the number of keys in the cache
          */
          uint32_t count() const;
+
+         bool isEcKey(const uint32_t& keyId) const;
+
+         bool isRsaKey(const uint32_t& keyId) const;
+
+         bool isEdKey(const uint32_t& keyId) const;
+
+        uint32_t findKeyIdForPairKeyId(const unsigned long& pairKeyId) const;      
 
     private:
         struct AsymmetricKeyData

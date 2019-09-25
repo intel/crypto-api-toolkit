@@ -612,8 +612,73 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
+    SgxStatus SymmetricCrypto::updateKeyFile(const uint32_t&   keyId,
+                                             const uint64_t*   attributeBuffer,
+                                             const uint64_t&   attributeBufferLen,
+                                             const ByteBuffer& pinMaterial)
+    {
+        SgxCryptStatus  status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+        bool            result = keyId;
+
+        do
+        {
+            result = keyId;
+            if (!result)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
+                break;
+            }
+
+            SymmetricKey symKey{};
+            result = getSymmetricKey(keyId, &symKey);
+
+            if (!result || !symKey.key.get())
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE;
+                break;
+            }
+
+            std::string filePath = symKey.keyFile;
+            if (filePath.empty())
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                break;
+            }
+
+            std::string newFileName = Utils::SgxFileUtils::generateRandomFilename();
+            if (newFileName.empty())
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                break;
+            }
+
+            std::string newFilePath;
+
+            result = Utils::TokenObjectParser::writeTokenObject(newFileName, pinMaterial, attributeBuffer, attributeBufferLen,
+                                                                symKey.key.get(), symKey.key.size(), symKey.isUsedForWrapping, 0, &newFilePath);
+            if (!result)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                break;
+            }
+
+            Utils::SgxFileUtils::remove(filePath);
+
+            symKey.keyFile = newFilePath;
+
+            mSymmetricKeyCache.add(keyId, symKey);
+
+        } while(false);
+
+        return static_cast<SgxStatus>(status);
+    }
+
+    //---------------------------------------------------------------------------------------------
     SgxStatus SymmetricCrypto::generateSymmetricKey(const uint32_t&         keyId,
-                                                    const SymmetricKeySize& keyLength)
+                                                    const SymmetricKeySize& keyLength,
+                                                    const uint64_t*         attributeBuffer,
+                                                    const uint64_t&         attributeBufferLen,
+                                                    const ByteBuffer&       pinMaterial)
     {
         SgxCryptStatus  status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
         bool            result = keyId;
@@ -649,6 +714,30 @@ namespace CryptoSgx
                 break;
             }
 
+            std::string filePath;
+
+            // If attributeBuffer != nullptr, it's a request to create a token object.
+            // Hence save the key along with attribute buffer into disk.
+            if (attributeBuffer)
+            {
+                std::string fileName = Utils::SgxFileUtils::generateRandomFilename();
+                if (fileName.empty())
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+
+                result = Utils::TokenObjectParser::writeTokenObject(fileName, pinMaterial, attributeBuffer, attributeBufferLen,
+                                                                    symKey.key.get(), symKey.key.size(), false, 0, &filePath);
+                if (!result)
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+
+                symKey.keyFile = filePath;
+            }
+
             //Store in internal cache
             mSymmetricKeyCache.add(keyId, symKey);
 
@@ -658,8 +747,53 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
-    SgxStatus SymmetricCrypto::addSymmetricKey(const uint32_t&       keyId,
-                                               const SymmetricKey&   symKey)
+    SgxStatus SymmetricCrypto::addSymmetricKey(const uint32_t&         keyId,
+                                               const std::string&      tokenObjectFilePath,
+                                               const uint8_t*          keyBuffer,
+                                               const SymmetricKeySize& keyBufferLen,
+                                               const bool&             usedForWrapping)
+    {
+        SgxStatus status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
+
+        do
+        {
+            if (!keyBuffer ||
+                !((SymmetricKeySize::keyLength128) == keyBufferLen ||
+                  (SymmetricKeySize::keyLength192) == keyBufferLen ||
+                  (SymmetricKeySize::keyLength256) == keyBufferLen))
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL);
+                break;
+            }
+
+            SymmetricKey symKey{};
+
+            bool result = allocateSymmetricKey(&symKey, keyBufferLen);
+            if (!result)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY);
+                break;
+            }
+
+            size_t keySize = static_cast<const uint32_t>(keyBufferLen);
+            memcpy_s(symKey.key.get(), keySize, keyBuffer, keySize);
+
+            symKey.keyFile = tokenObjectFilePath;
+            symKey.isUsedForWrapping = usedForWrapping;
+
+            status = addSymmetricKey(keyId, symKey);
+            if (static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS) != status)
+            {
+                break;
+            }
+        } while(false);
+
+        return status;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    SgxStatus SymmetricCrypto::addSymmetricKey(const uint32_t&     keyId,
+                                               const SymmetricKey& symKey)
     {
         SgxCryptStatus  status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
         bool            result = keyId;
@@ -713,7 +847,7 @@ namespace CryptoSgx
         {
             return false;
         }
- 
+
         const sgx_status_t keyPopulated = sgx_read_rand(symKey->key.get(), symKey->key.size());
         return (sgx_status_t::SGX_SUCCESS == keyPopulated);
     }
@@ -725,54 +859,6 @@ namespace CryptoSgx
         if (!mSymmetricKeyCache.remove(keyId))
         {
             status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
-        }
-
-        return static_cast<SgxStatus>(status);
-    }
-
-    //---------------------------------------------------------------------------------------------
-    SgxStatus SymmetricCrypto::exportSymmetricKeyPbind(const uint32_t&   keyId,
-                                                       uint8_t*          destBuffer,
-                                                       const uint32_t&   destBufferLen,
-                                                       uint32_t*         destBufferWritten)
-{
-        bool            result = false;
-        SgxCryptStatus  status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-
-        do
-        {
-            if (!keyId)
-            {
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE;
-                break;
-            }
-
-            if (!destBufferWritten)
-            {
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
-                break;
-            }
-
-            SymmetricKey symKey{};
-            result = getSymmetricKey(keyId, &symKey);
-
-            if (!result || !symKey.key.get())
-            {
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE;
-                break;
-            }
-
-            result = exportPlatformBoundKey(symKey, destBuffer, destBufferLen, destBufferWritten, &status);
-            if (result)
-            {
-                symKey.isPlatformBound = true;
-                mSymmetricKeyCache.add(keyId, symKey); // Update in internal cache
-            }
-        } while (false);
-
-        if (result)
-        {
-            status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
         }
 
         return static_cast<SgxStatus>(status);
@@ -798,97 +884,14 @@ namespace CryptoSgx
         mSymmetricKeyCache.clear();
     }
 
-    //---------------------------------------------------------------------------------------------
-    bool SymmetricCrypto::exportPlatformBoundKey(const SymmetricKey&    symKey,
-                                                 uint8_t*               destBuffer,
-                                                 const uint32_t&        destBufferLen,
-                                                 uint32_t*              destBufferWritten,
-                                                 SgxCryptStatus*        status)
-    {
-        bool        result              = false;
-        uint32_t    pbindInputDataSize  = 0;
-        uint32_t    sealDataSize        = 0;
-
-        if (!status)
-        {
-            return false;
-        }        
-
-        do
-        {
-            if (!symKey.key.get())
-            {
-                *status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
-                break;
-            }
-
-            pbindInputDataSize = symKey.key.size() + sizeof(symKey.isUsedForWrapping);
-            sealDataSize = sgx_calc_sealed_data_size(0, pbindInputDataSize);
-
-            if (UINT32_MAX == sealDataSize)
-            {
-                *status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
-                break;
-            }
-            else
-            {
-                *destBufferWritten = sealDataSize;
-                if (!destBuffer)
-                {
-                    result = true;
-                    break;
-                }
-
-                if (destBufferLen < sealDataSize)
-                {
-                    *status = SgxCryptStatus::SGX_CRYPT_STATUS_BUFFER_TOO_SHORT;
-                    break;
-                }
-
-                std::unique_ptr<uint8_t[]> dataToBePlatformBound(new (std::nothrow) uint8_t[pbindInputDataSize]);
-                if (!dataToBePlatformBound.get())
-                {
-                    result = false;
-                    *status = SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY;
-                    break;
-                }
-
-                memcpy_s(dataToBePlatformBound.get(),
-                         pbindInputDataSize,
-                         symKey.key.get(),
-                         symKey.key.size());
-
-                memcpy_s(dataToBePlatformBound.get() + symKey.key.size(),
-                         pbindInputDataSize - symKey.key.size(),
-                         &symKey.isUsedForWrapping,
-                         sizeof(symKey.isUsedForWrapping));
-
-                sgx_status_t sealingStatus = sgx_seal_data(0,
-                                                           nullptr,
-                                                           pbindInputDataSize,
-                                                           dataToBePlatformBound.get(),
-                                                           sealDataSize,
-                                                           reinterpret_cast<sgx_sealed_data_t*>(destBuffer));
-
-                result = (sgx_status_t::SGX_SUCCESS == sealingStatus);
-
-                if (!result)
-                {
-                    *destBufferWritten = 0;
-                    *status = SgxCryptStatus::SGX_CRYPT_STATUS_SEALED_DATA_FAILED;
-                    break;
-                }
-            }
-        } while (false);
-
-        return result;
-    }
-
 #ifdef IMPORT_RAW_KEY
     //---------------------------------------------------------------------------------------------
-    SgxStatus SymmetricCrypto::importRawKey(const uint32_t&  keyId,
-                                            const uint8_t*   sourceBuffer,
-                                            const uint16_t&  sourceBufferLen)
+    SgxStatus SymmetricCrypto::importRawKey(const uint32_t&   keyId,
+                                            const uint8_t*    sourceBuffer,
+                                            const uint16_t&   sourceBufferLen,
+                                            const uint64_t*   attributeBuffer,
+                                            const uint64_t&   attributeBufferLen,
+                                            const ByteBuffer& pinMaterial)
     {
         bool            result = false;
         SgxCryptStatus  status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
@@ -926,6 +929,28 @@ namespace CryptoSgx
                      sourceBuffer,
                      sourceBufferLen);
 
+            std::string filePath;
+
+            if (attributeBuffer)
+            {
+                std::string fileName = Utils::SgxFileUtils::generateRandomFilename();
+                if (fileName.empty())
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+
+                result = Utils::TokenObjectParser::writeTokenObject(fileName, pinMaterial, attributeBuffer, attributeBufferLen,
+                                                                    symKey.key.get(), symKey.key.size(), false, 0, &filePath);
+                if (!result)
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+
+                symKey.keyFile = filePath;
+            }
+
             mSymmetricKeyCache.add(keyId, symKey);
 
         } while (false);
@@ -933,140 +958,6 @@ namespace CryptoSgx
         return static_cast<SgxStatus>(status);
     }
 #endif
-    //---------------------------------------------------------------------------------------------
-    void SymmetricCrypto::markAsWrappingKey(const uint32_t &keyId)
-    {
-        const bool result = mSymmetricKeyCache.find(keyId);
-
-        if (result)
-        {
-            SymmetricKey symKey         = mSymmetricKeyCache.get(keyId);
-            symKey.isUsedForWrapping    = true;
-
-            mSymmetricKeyCache.add(keyId, symKey);
-        }
-    }
-
-    //---------------------------------------------------------------------------------------------
-    bool SymmetricCrypto::checkWrappingStatus(const uint32_t &keyId)
-    {
-        bool result = mSymmetricKeyCache.find(keyId);
-
-        if (result)
-        {
-            SymmetricKey symKey = mSymmetricKeyCache.get(keyId);
-            result              = symKey.isUsedForWrapping;
-        }
-
-        return result;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    SgxStatus SymmetricCrypto::importSymmetricKeyPbind(const uint32_t&    keyId,
-                                                       const uint8_t*     sourceBuffer,
-                                                       const uint32_t&    sourceBufferLen)
-    {
-        SgxCryptStatus  status              = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        bool            result              = false;
-        uint32_t        decryptedDataSize   = 0;
-        uint16_t        keySize             = 0;
-        SymmetricKey    symKey{};
-
-        do
-        {
-            result = sourceBuffer    &&
-                     sourceBufferLen &&
-                     keyId;
-
-            if (!result)
-            {
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
-                break;
-            }
-
-            if (static_cast<SgxMaxKeyLimits>(mSymmetricKeyCache.count()) >= SgxMaxKeyLimits::symmetric)
-            {
-                result = false;
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_KEY_TABLE_FULL;
-                break;
-            }
-
-            decryptedDataSize = sgx_get_encrypt_txt_len(reinterpret_cast<const sgx_sealed_data_t*>(sourceBuffer));
-            keySize           = decryptedDataSize - sizeof(symKey.isUsedForWrapping);
-
-            /* For sourceBuffer which is not a platform bound data, sgx_get_encrypt_txt_len() does not return
-               UINT32_MAX as per the api documentation. Hence, a bound is placed on the return value of
-               sgx_get_encrypt_txt_len() based on the symmetric key lengths that are supported.
-            */
-            result = SymmetricKeySize::keyLength128 == static_cast<SymmetricKeySize>(keySize) ||
-                     SymmetricKeySize::keyLength192 == static_cast<SymmetricKeySize>(keySize) ||
-                     SymmetricKeySize::keyLength256 == static_cast<SymmetricKeySize>(keySize);
-
-            if (!result || UINT32_MAX == decryptedDataSize)
-            {
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_BUFFER_SIZE;
-                break;
-            }
-
-            if (decryptedDataSize &&
-                (true == (result = allocateSymmetricKey(&symKey, static_cast<SymmetricKeySize>(keySize)))))
-            {
-                std::unique_ptr<uint8_t[]> tempDest(new (std::nothrow) uint8_t[decryptedDataSize], std::default_delete<uint8_t[]>());
-
-                if (!tempDest.get())
-                {
-                    result = false;
-                    status = SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY;
-                    break;
-                }
-
-                sgx_status_t sealingStatus = sgx_unseal_data(reinterpret_cast<const sgx_sealed_data_t*>(sourceBuffer),
-                                                             nullptr,
-                                                             nullptr,
-                                                             tempDest.get(),
-                                                             &decryptedDataSize);
-
-                result = (sgx_status_t::SGX_SUCCESS == sealingStatus);
-
-                if (!result)
-                {
-                    status = SgxCryptStatus::SGX_CRYPT_STATUS_SEALED_DATA_FAILED;
-                    break;
-                }
-
-                bool isUsedForWrapping = static_cast<bool>(*(tempDest.get() + keySize));
-
-                symKey.key.allocate(keySize);
-                if (!symKey.key.isValid())
-                {
-                    result = false;
-                    status = SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY;
-                    break;
-                }
-                symKey.key.fromData(tempDest.get(), keySize);
-                symKey.isPlatformBound      = true;
-                symKey.isUsedForWrapping    = isUsedForWrapping;
-
-                mSymmetricKeyCache.add(keyId, symKey);
-            }
-            else
-            {
-                result = false;
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
-                break;
-            }
-        } while (false);
-
-        if (!result)
-        {
-            status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
-        }
-        else
-        {
-            status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        }
-        return static_cast<SgxStatus>(status);
-    }
 
     //---------------------------------------------------------------------------------------------
     void SymmetricCrypto::fillCryptInitParams(CryptParams*              cryptParams,
@@ -1233,7 +1124,7 @@ namespace CryptoSgx
             }
             else if (BlockCipherMode::gcm == cipherMode)
             {
-                result = !padding && isSupportedTagSize(tagBits/8);;
+                result = !padding && isSupportedTagSize(tagBits/8);
 
                 if (!result)
                 {
@@ -1658,6 +1549,62 @@ namespace CryptoSgx
         {
             mIppCtxStateCache.remove(keyId);
         }
+    }
+
+    //--------------------------------------------------------------------------------------------
+    SgxStatus SymmetricCrypto::updateHandle(uint32_t keyHandle, uint32_t newKeyHandle)
+    {
+        if (!mSymmetricKeyCache.find(keyHandle))
+        {
+            return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE);
+        }
+
+        SymmetricKey symmetricKey = mSymmetricKeyCache.get(keyHandle);
+
+        mSymmetricKeyCache.add(newKeyHandle, symmetricKey);
+
+        bool removeTokenFile = false;
+        mSymmetricKeyCache.remove(keyHandle, removeTokenFile);
+
+        return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
+    }
+
+    //---------------------------------------------------------------------------------------------
+    SgxStatus SymmetricCrypto::setWrappingStatus(const uint32_t& keyId)
+    {
+        if (!mSymmetricKeyCache.find(keyId))
+        {
+            return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE);
+        }
+
+        SymmetricKey symmetricKey = mSymmetricKeyCache.get(keyId);
+
+        if (symmetricKey.isUsedForWrapping)
+        {
+            return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
+        }
+
+        if (!symmetricKey.keyFile.empty())
+        {
+            if (!Utils::TokenObjectParser::setWrappingStatus(symmetricKey.keyFile, 0))
+            {
+                return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL);
+            }
+        }
+
+        symmetricKey.isUsedForWrapping = true;
+
+        mSymmetricKeyCache.add(keyId, symmetricKey);
+
+        return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
+    }
+
+    //---------------------------------------------------------------------------------------------
+    bool SymmetricCrypto::checkWrappingStatus(const uint32_t& keyId)
+    {
+        SymmetricKey symmetricKey = mSymmetricKeyCache.get(keyId);
+
+        return symmetricKey.isUsedForWrapping;
     }
 
 } //CryptoSgx

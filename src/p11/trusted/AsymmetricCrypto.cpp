@@ -60,22 +60,30 @@ namespace CryptoSgx
                                 }
 #else
                                 /* OpenSSL 1.1.0 and above */
-                                const BIGNUM *bn_p = nullptr;
-                                const BIGNUM *bn_q = nullptr;
+                                bool         result = false;
+                                const BIGNUM *bn_p  = nullptr;
+                                const BIGNUM *bn_q  = nullptr;
+
                                 RSA_get0_factors(asymKey.key, &bn_p, &bn_q);
 
                                 if (bn_p && bn_q)
                                 {
-                                    return true;
+                                    result = true;
                                 }
 #endif
-                                return false;
+                                return result;
                            };
 
     //---------------------------------------------------------------------------------------------
     auto getEncodedKey = [](const AsymmetricKey& asymKey, uint8_t** encodedKey, const bool& onlyPubicKeyPresent) -> int
                            {
                               int bytesWritten = 0;
+
+                              if (!encodedKey || !*encodedKey)
+                              {
+                                  return bytesWritten;
+                              }
+
                               if (onlyPubicKeyPresent)
                               {
                                   // Only public key encoded
@@ -86,6 +94,7 @@ namespace CryptoSgx
                                   // Both public & private keys encoded
                                   bytesWritten = i2d_RSAPrivateKey(asymKey.key, encodedKey);
                               }
+
                               return bytesWritten;
                            };
 
@@ -108,6 +117,413 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
+    static EC_POINT* decodeEcPublicKey(const uint8_t* encodedKey, const uint64_t& encodedKeyLen, const EC_GROUP* ecGroup)
+    {
+        bool      result = false;
+        EC_POINT* ecPoint;
+
+        do
+        {
+            // Two bytes are stuffed in while encoding to identify if EC_POINT is short/long.
+            size_t extraBytes = 2;
+
+            if (!encodedKey || !ecGroup || (encodedKeyLen <= extraBytes))
+            {
+                break;
+            }
+
+            // First two bytes of encodedKey are used to do integrity checks.
+            uint8_t byte1  = 0;
+            uint8_t byte2  = 0;
+            size_t  offset = 0;
+
+            memcpy_s(&byte1, sizeof(uint8_t), encodedKey + offset, sizeof(uint8_t));
+            offset++;
+
+            memcpy_s(&byte2, sizeof(uint8_t), encodedKey + offset, sizeof(uint8_t));
+
+            // Integrity check
+            if (V_ASN1_OCTET_STRING != byte1)
+            {
+                break;
+            }
+
+            // For short EC_POINT
+            if (byte2 < 0x80)
+            {
+                if (byte2 != encodedKeyLen - extraBytes)
+                {
+                    break;
+                }
+            }
+            else // For long EC_POINT
+            {
+                size_t bytesLen = byte2 & 0x7f;
+                extraBytes += bytesLen;
+
+                if (extraBytes >= encodedKeyLen)
+                {
+                    break;
+                }
+
+                unsigned long val = 0;
+                size_t rawPublicKeyOffset = 2;
+                size_t rawPublicKeyLen = encodedKeyLen - rawPublicKeyOffset;
+
+                for (size_t i = 0; i < std::min(size_t{8}, rawPublicKeyLen); i++)
+                {
+                    val <<= 8;
+                    val += *(encodedKey + rawPublicKeyOffset + i);
+                }
+
+                if (val != (encodedKeyLen - extraBytes))
+                {
+                    break;
+                }
+            }
+
+            const size_t rawPublicKeyOffset = extraBytes;
+            const size_t rawPublicKeyLen    = encodedKeyLen - extraBytes;
+
+            if (!rawPublicKeyLen)
+            {
+                break;
+            }
+
+            // Extract EC_POINT from ec group
+            ecPoint = EC_POINT_new(ecGroup);
+            if (!ecPoint)
+            {
+                break;
+            }
+
+            //Decode EC_POINT from a octet string
+            if (!EC_POINT_oct2point(ecGroup, ecPoint, encodedKey + rawPublicKeyOffset, rawPublicKeyLen, nullptr))
+            {
+                EC_POINT_free(ecPoint);
+                break;
+            }
+
+            result = true;
+        } while(false);
+
+        if (!result)
+        {
+            return nullptr;
+        }
+
+        return ecPoint;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::addEcKey(const uint32_t&     keyId,
+                                         const std::string&  tokenObjectFilePath,
+                                         const uint8_t*      encodedKey,
+                                         const uint64_t&     encodedKeyLen,
+                                         const KeyClassType& keyClassType,
+                                         const bool&         usedForWrapping,
+                                         const uint64_t&     pairKeyId)
+    {
+        SgxStatus status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL);
+        EC_KEY*   ecKey  = nullptr;
+
+        do
+        {
+            if (!encodedKey)
+            {
+                break;
+            }
+
+            if (!((KeyClassType::EcPublicKey  == keyClassType) ||
+                  (KeyClassType::EcPrivateKey == keyClassType)))
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
+                break;
+            }
+
+            if ((KeyClassType::EcPublicKey == keyClassType) &&
+                (static_cast<SgxMaxKeyLimits>(mAsymmetricPublicKeyCache.count()) >= SgxMaxKeyLimits::asymmetric))
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_KEY_TABLE_FULL);
+                break;
+            }
+            else if ((KeyClassType::EcPrivateKey == keyClassType) &&
+                     (static_cast<SgxMaxKeyLimits>(mAsymmetricPrivateKeyCache.count()) >= SgxMaxKeyLimits::asymmetric))
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_KEY_TABLE_FULL);
+                break;
+            }
+
+            uint8_t privateKeyLen = 0;
+            uint8_t derParamsLen  = 0;
+            uint8_t publicKeyLen  = 0;
+
+            // Ensure bound checks for encodedKey
+            if (encodedKeyLen < privateKeyOffset)
+            {
+                break;
+            }
+
+            memcpy_s(&privateKeyLen, sizeof(uint8_t), encodedKey + privateKeyLenOffset, sizeof(uint8_t));
+            memcpy_s(&derParamsLen,  sizeof(uint8_t), encodedKey + derParamsLenOffset, sizeof(uint8_t));
+            memcpy_s(&publicKeyLen,  sizeof(uint8_t), encodedKey + publicKeyLenOffset, sizeof(uint8_t));
+
+            // Ensure bound checks for encodedKey
+            const size_t encodedKeyLenRequired = 3*sizeof(uint8_t) + privateKeyLen + derParamsLen + publicKeyLen;
+            if (encodedKeyLen < encodedKeyLenRequired)
+            {
+                break;
+            }
+
+            const size_t derParamsOffset  = privateKeyOffset + privateKeyLen;
+            const size_t publicKeyOffset  = derParamsOffset + derParamsLen;
+
+            // Create an Ec Key
+            ecKey = EC_KEY_new();
+            if (!ecKey)
+            {
+                break;
+            }
+
+            // Extract Ec Group
+            const unsigned char *derParamsPtr = encodedKey + derParamsOffset;
+            EC_GROUP* ecGroup = d2i_ECPKParameters(nullptr, &derParamsPtr, derParamsLen);
+            if (!ecGroup)
+            {
+                break;
+            }
+
+            // Set Ec Group
+            EC_KEY_set_group(ecKey, ecGroup);
+
+            // Extract private key
+            BIGNUM* privateKey = BN_bin2bn(encodedKey + privateKeyOffset, privateKeyLen, nullptr);
+            if (!privateKey)
+            {
+                break;
+            }
+
+            // Set private key
+            EC_KEY_set_private_key(ecKey, privateKey);
+            BN_clear_free(privateKey);
+
+            // Extract public key
+            EC_POINT* publicKey = decodeEcPublicKey(encodedKey + publicKeyOffset, publicKeyLen, ecGroup);
+            if (!publicKey)
+            {
+                break;
+            }
+
+            EC_KEY_set_public_key(ecKey, publicKey);
+            EC_POINT_free(publicKey);
+            EC_GROUP_free(ecGroup);
+
+            // Add in key cache
+            AsymmetricKey asymKey{};
+
+            asymKey.isUsedForWrapping = usedForWrapping;
+            asymKey.pairKeyId         = pairKeyId;
+            asymKey.keyFile           = tokenObjectFilePath;
+            asymKey.ecKey             = ecKey;
+
+            if (KeyClassType::EcPublicKey == keyClassType)
+            {
+                mAsymmetricPublicKeyCache.add(keyId, asymKey);
+            }
+            else if (KeyClassType::EcPrivateKey == keyClassType)
+            {
+                mAsymmetricPrivateKeyCache.add(keyId, asymKey);
+            }
+            else
+            {
+                break;
+            }
+
+            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
+        } while(false);
+
+        if (ecKey && (static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS) != status))
+        {
+            EC_KEY_free(ecKey);
+        }
+
+        return status;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::addEdKey(const uint32_t&     keyId,
+                                         const std::string&  tokenObjectFilePath,
+                                         const uint8_t*      encodedKey,
+                                         const uint64_t&     encodedKeyLen,
+                                         const KeyClassType& keyClassType,
+                                         const bool&         usedForWrapping,
+                                         const uint64_t&     pairKeyId)
+    {
+        SgxStatus status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL);
+
+        do
+        {
+            if (!encodedKey)
+            {
+                break;
+            }
+
+            if (!((KeyClassType::EdPublicKey  == keyClassType) ||
+                  (KeyClassType::EdPrivateKey == keyClassType)))
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
+                break;
+            }
+
+            if ((KeyClassType::EdPublicKey == keyClassType) &&
+                (static_cast<SgxMaxKeyLimits>(mAsymmetricPublicKeyCache.count()) >= SgxMaxKeyLimits::asymmetric))
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_KEY_TABLE_FULL);
+                break;
+            }
+            else if ((KeyClassType::EdPrivateKey == keyClassType) &&
+                     (static_cast<SgxMaxKeyLimits>(mAsymmetricPrivateKeyCache.count()) >= SgxMaxKeyLimits::asymmetric))
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_KEY_TABLE_FULL);
+                break;
+            }
+
+            uint8_t privateKeyLen = 0;
+            uint8_t derParamsLen  = 0;
+            uint8_t publicKeyLen  = 0;
+
+            // Ensure bound checks for encodedKey
+            if (encodedKeyLen < privateKeyOffset)
+            {
+                break;
+            }
+
+            memcpy_s(&privateKeyLen, sizeof(uint8_t), encodedKey + privateKeyLenOffset, sizeof(uint8_t));
+            memcpy_s(&derParamsLen,  sizeof(uint8_t), encodedKey + derParamsLenOffset, sizeof(uint8_t));
+            memcpy_s(&publicKeyLen,  sizeof(uint8_t), encodedKey + publicKeyLenOffset, sizeof(uint8_t));
+
+            // Ensure bound checks for encodedKey
+            const size_t encodedKeyLenRequired = 3*sizeof(uint8_t) + privateKeyLen + derParamsLen + publicKeyLen;
+            if (encodedKeyLen < encodedKeyLenRequired)
+            {
+                break;
+            }
+
+            const size_t derParamsOffset  = privateKeyOffset + privateKeyLen;
+            const size_t publicKeyOffset  = derParamsOffset + derParamsLen;
+
+            // Set private key
+            if (ed25519KeyLength != privateKeyLen)
+            {
+                break;
+            }
+
+            EVP_PKEY* edKey = EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, nullptr, encodedKey + privateKeyOffset, privateKeyLen);
+            if (!edKey)
+            {
+                break;
+            }
+
+            // Add in key cache
+            AsymmetricKey asymKey{};
+
+            asymKey.isUsedForWrapping = usedForWrapping;
+            asymKey.pairKeyId         = pairKeyId;
+            asymKey.keyFile           = tokenObjectFilePath;
+            asymKey.edKey             = edKey;
+
+            if (KeyClassType::EdPublicKey == keyClassType)
+            {
+                mAsymmetricPublicKeyCache.add(keyId, asymKey);
+            }
+            else if (KeyClassType::EdPrivateKey == keyClassType)
+            {
+                mAsymmetricPrivateKeyCache.add(keyId, asymKey);
+            }
+            else
+            {
+                break;
+            }
+
+            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
+        } while(false);
+
+        return status;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::addAsymmetricKey(const uint32_t&     keyId,
+                                                 const std::string&  tokenObjectFilePath,
+                                                 const uint8_t*      encodedKey,
+                                                 const uint64_t&     encodedKeyLen,
+                                                 const KeyClassType& keyClassType,
+                                                 const bool&         usedForWrapping,
+                                                 const uint64_t&     pairKeyId)
+    {
+        SgxStatus status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
+
+        do
+        {
+            if (!encodedKey)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL);
+                break;
+            }
+
+            if (!((KeyClassType::RsaPublicKey  == keyClassType) ||
+                  (KeyClassType::RsaPrivateKey == keyClassType)))
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
+                break;
+            }
+
+            if ((KeyClassType::RsaPublicKey == keyClassType) &&
+                (static_cast<SgxMaxKeyLimits>(mAsymmetricPublicKeyCache.count()) >= SgxMaxKeyLimits::asymmetric))
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_KEY_TABLE_FULL);
+                break;
+            }
+            else if ((KeyClassType::RsaPrivateKey == keyClassType) &&
+                     (static_cast<SgxMaxKeyLimits>(mAsymmetricPrivateKeyCache.count()) >= SgxMaxKeyLimits::asymmetric))
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_KEY_TABLE_FULL);
+                break;
+            }
+
+            AsymmetricKey asymKey{};
+
+            if (nullptr == d2i_RSAPrivateKey(&asymKey.key,
+                                             const_cast<const unsigned char**>(&encodedKey),
+                                             encodedKeyLen))
+            {
+                if (nullptr == d2i_RSAPublicKey(&asymKey.key,
+                                                const_cast<const unsigned char**>(&encodedKey),
+                                                encodedKeyLen))
+                {
+                    status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL);
+                    break;
+                }
+            }
+
+            asymKey.keyFile = tokenObjectFilePath;
+            asymKey.isUsedForWrapping = usedForWrapping;
+            asymKey.pairKeyId = pairKeyId;
+
+            if (KeyClassType::RsaPublicKey == keyClassType)
+            {
+                mAsymmetricPublicKeyCache.add(keyId, asymKey);
+            }
+            else if (KeyClassType::RsaPrivateKey == keyClassType)
+            {
+                mAsymmetricPrivateKeyCache.add(keyId, asymKey);
+            }
+
+        } while(false);
+
+        return status;
+    }
+
+    //---------------------------------------------------------------------------------------------
     SgxStatus AsymmetricCrypto::removeAsymmetricKey(const uint32_t& keyId)
     {
         SgxCryptStatus status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
@@ -117,47 +533,39 @@ namespace CryptoSgx
         {
             asymmetricKey = mAsymmetricPrivateKeyCache.get(keyId);
 
-            if (!asymmetricKey.pairKeyId)
+            if (asymmetricKey.key)
             {
                 RSA_free(asymmetricKey.key);
             }
-            else
+            else if (asymmetricKey.ecKey)
             {
-                if (mAsymmetricPublicKeyCache.find(asymmetricKey.pairKeyId))
-                {
-                    AsymmetricKey asymmetricKeyPb = mAsymmetricPublicKeyCache.get(asymmetricKey.pairKeyId);
-                    asymmetricKeyPb.pairKeyId     = 0;
-                    mAsymmetricPublicKeyCache.add(asymmetricKey.pairKeyId, asymmetricKeyPb);
-                }
+                EC_KEY_free(asymmetricKey.ecKey);
+            }
+            else if (asymmetricKey.edKey)
+            {
+                EVP_PKEY_free(asymmetricKey.edKey);
             }
 
-            if (!mAsymmetricPrivateKeyCache.remove(keyId))
-            {
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
-            }
+            mAsymmetricPrivateKeyCache.remove(keyId);
         }
         else if (mAsymmetricPublicKeyCache.find(keyId)) // Check in public key cache
         {
             asymmetricKey = mAsymmetricPublicKeyCache.get(keyId);
 
-            if (!asymmetricKey.pairKeyId)
+            if (asymmetricKey.key)
             {
                 RSA_free(asymmetricKey.key);
             }
-            else
+            else if (asymmetricKey.ecKey)
             {
-                if (mAsymmetricPrivateKeyCache.find(asymmetricKey.pairKeyId))
-                {
-                    AsymmetricKey asymmetricKeyPr = mAsymmetricPrivateKeyCache.get(asymmetricKey.pairKeyId);
-                    asymmetricKeyPr.pairKeyId     = 0;
-                    mAsymmetricPrivateKeyCache.add(asymmetricKey.pairKeyId, asymmetricKeyPr);
-                }
+                EC_KEY_free(asymmetricKey.ecKey);
+            }
+            else if (asymmetricKey.edKey)
+            {
+                EVP_PKEY_free(asymmetricKey.edKey);
             }
 
-            if (!mAsymmetricPublicKeyCache.remove(keyId))
-            {
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
-            }
+            mAsymmetricPublicKeyCache.remove(keyId);
         }
         else
         {
@@ -184,7 +592,7 @@ namespace CryptoSgx
             if (mAsymmetricPublicKeyCache.find(keyId))
             {
                 *asymmetricKey = mAsymmetricPublicKeyCache.get(keyId);
-                result         = asymmetricKey->key;
+                result         = asymmetricKey->key || asymmetricKey->ecKey || asymmetricKey->edKey;
             }
         }
         else if (OperationType::Private == opType)
@@ -192,7 +600,7 @@ namespace CryptoSgx
             if (mAsymmetricPrivateKeyCache.find(keyId))
             {
                 *asymmetricKey = mAsymmetricPrivateKeyCache.get(keyId);
-                result         = asymmetricKey->key;
+                result         = asymmetricKey->key || asymmetricKey->ecKey || asymmetricKey->edKey;
             }
         }
         else if (OperationType::Any == opType)
@@ -200,12 +608,12 @@ namespace CryptoSgx
             if (mAsymmetricPublicKeyCache.find(keyId))
             {
                 *asymmetricKey = mAsymmetricPublicKeyCache.get(keyId);
-                result         = asymmetricKey->key;
+                result         = asymmetricKey->key || asymmetricKey->ecKey || asymmetricKey->edKey;
             }
             else if (mAsymmetricPrivateKeyCache.find(keyId))
             {
                 *asymmetricKey = mAsymmetricPrivateKeyCache.get(keyId);
-                result         = asymmetricKey->key;
+                result         = asymmetricKey->key || asymmetricKey->ecKey || asymmetricKey->edKey;
             }
         }
 
@@ -228,7 +636,7 @@ namespace CryptoSgx
                                   sourceBuffer               &&
                                   destBufferRequiredLength   &&
                                   destBufferLen              &&
-                                  RsaPadding::rsaPkcs1Oaep == rsaPadding));
+                                  (RsaPadding::rsaPkcs1Oaep == rsaPadding || RsaPadding::rsaPkcs1 == rsaPadding)));
 
         if (result)
         {
@@ -346,7 +754,7 @@ namespace CryptoSgx
                                  (sourceBufferLen           &&
                                   sourceBuffer              &&
                                   destBufferRequiredLength  &&
-                                  RsaPadding::rsaPkcs1Oaep == rsaPadding));
+                                  (RsaPadding::rsaPkcs1Oaep == rsaPadding || RsaPadding::rsaPkcs1 == rsaPadding)));
 
         if (result)
         {
@@ -489,14 +897,72 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
-    SgxStatus AsymmetricCrypto::generateAsymmetricKey(const uint32_t&           publicKeyId,
-                                                      const uint32_t&           privateKeyId,
-                                                      const AsymmetricKeySize&  modulusLength)
+    bool AsymmetricCrypto::encodeRsaKey(const RSA* rsaKey, uint8_t** encodedKey, uint64_t* encodedKeySize, bool onlyPublicKey)
     {
-        SgxCryptStatus  status  = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
-        BIGNUM*         bigNum  = nullptr;
-        RSA*            rsaKey  = nullptr;
-        bool            result  = false;
+        if (!rsaKey || !encodedKey || !encodedKeySize)
+        {
+            return false;
+        }
+
+        int keySizeRequired = 0;
+        int bytesWritten    = 0;
+
+        if (onlyPublicKey)
+        {
+            keySizeRequired = i2d_RSAPublicKey(rsaKey, nullptr);
+        }
+        else
+        {
+            keySizeRequired = i2d_RSAPrivateKey(rsaKey, nullptr);
+        }
+
+        if (keySizeRequired < 0)
+        {
+            return false;
+        }
+
+        *encodedKey = new (std::nothrow) uint8_t[keySizeRequired];
+        if (!*encodedKey)
+        {
+            return false;
+        }
+
+        if (onlyPublicKey)
+        {
+            bytesWritten = i2d_RSAPublicKey(rsaKey, encodedKey);
+        }
+        else
+        {
+            bytesWritten = i2d_RSAPrivateKey(rsaKey, encodedKey);
+        }
+
+        if (bytesWritten < 0)
+        {
+            return false;
+        }
+
+        *encodedKey -= (bytesWritten);
+        *encodedKeySize = keySizeRequired;
+
+        return true;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::generateAsymmetricKey(const uint32_t&          publicKeyId,
+                                                      const uint32_t&          privateKeyId,
+                                                      const AsymmetricKeySize& modulusLength,
+                                                      const uint64_t*          attributeBufferPublic,
+                                                      const uint64_t&          attributeBufferPublicLen,
+                                                      const uint64_t*          attributeBufferPrivate,
+                                                      const uint64_t&          attributeBufferPrivateLen,
+                                                      const ByteBuffer&        pinMaterial)
+    {
+        SgxCryptStatus status     = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+        BIGNUM*        bigNum     = nullptr;
+        RSA*           rsaKey     = nullptr;
+        uint8_t*       encodedKey = nullptr;
+        bool           result     = false;
+        std::string    filePathPublicKey, filePathPrivateKey;
 
         do
         {
@@ -519,6 +985,12 @@ namespace CryptoSgx
                 break;
             }
 
+            if (static_cast<SgxMaxKeyLimits>(mAsymmetricPrivateKeyCache.count()) >= SgxMaxKeyLimits::asymmetric)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_KEY_TABLE_FULL;
+                break;
+            }
+
             rsaKey = RSA_new();
             bigNum = BN_new();
 
@@ -536,15 +1008,76 @@ namespace CryptoSgx
             {
                 // public key
                 AsymmetricKey asymKey{};
+                asymKey.key = rsaKey;
 
-                asymKey.key                 = rsaKey;
-                asymKey.pairKeyId           = privateKeyId;
-                asymKey.isUsedForWrapping   = false;
+                uint64_t encodedKeySize = 0;
+
+                if (attributeBufferPublic || attributeBufferPrivate)
+                {
+                    if (!encodeRsaKey(asymKey.key, &encodedKey, &encodedKeySize))
+                    {
+                        status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                        break;
+                    }
+                }
+
+                uint64_t pairKeyId = 0;
+                if (SGX_SUCCESS != sgx_read_rand(reinterpret_cast<unsigned char*>(&pairKeyId), sizeof(pairKeyId)))
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
+                    break;
+                }
+
+                if (attributeBufferPublic)
+                {
+                    std::string fileName = Utils::SgxFileUtils::generateRandomFilename();
+                    if (fileName.empty())
+                    {
+                        status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                        break;
+                    }
+
+                    result = Utils::TokenObjectParser::writeTokenObject(fileName, pinMaterial, attributeBufferPublic, attributeBufferPublicLen,
+                                                                        encodedKey, encodedKeySize, false, pairKeyId, &filePathPublicKey);
+                    if (!result)
+                    {
+                        status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                        break;
+                    }
+                }
+
+                if (attributeBufferPrivate)
+                {
+                    std::string fileName = Utils::SgxFileUtils::generateRandomFilename();
+                    if (fileName.empty())
+                    {
+                        status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                        break;
+                    }
+
+                    result = Utils::TokenObjectParser::writeTokenObject(fileName, pinMaterial, attributeBufferPrivate, attributeBufferPrivateLen,
+                                                                        encodedKey, encodedKeySize, false, pairKeyId, &filePathPrivateKey);
+                    if (!result)
+                    {
+                        status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                        break;
+                    }
+                }
+
+                RSA* dupRsaKey = RSAPrivateKey_dup(asymKey.key);
+                if (!dupRsaKey)
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
+                    break;
+                }
 
                 // add public key to the cache
+                asymKey.pairKeyId   = pairKeyId;
+                asymKey.keyFile     = filePathPublicKey;
                 mAsymmetricPublicKeyCache.add(publicKeyId, asymKey);
 
-                asymKey.pairKeyId = publicKeyId;
+                asymKey.key         = dupRsaKey;
+                asymKey.keyFile     = filePathPrivateKey;
                 mAsymmetricPrivateKeyCache.add(privateKeyId, asymKey);
 
                 status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
@@ -558,9 +1091,21 @@ namespace CryptoSgx
 
         BN_clear_free(bigNum);
 
+        if (encodedKey)
+        {
+            delete encodedKey;
+            encodedKey = nullptr;
+        }
+
         if (rsaKey && !result)
         {
             RSA_free(rsaKey);
+        }
+
+        if (SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS != status)
+        {
+            Utils::SgxFileUtils::remove(filePathPublicKey);
+            Utils::SgxFileUtils::remove(filePathPrivateKey);
         }
 
         return static_cast<SgxStatus>(status);
@@ -651,11 +1196,15 @@ namespace CryptoSgx
                                                 uint8_t*          modulusBuffer,
                                                 const uint32_t&   modulusBufferLen,
                                                 uint8_t*          exponentBuffer,
-                                                const uint32_t&   exponentBufferLen)
+                                                const uint32_t&   exponentBufferLen,
+                                                const uint64_t*   attributeBuffer,
+                                                const uint64_t&   attributeBufferLen,
+                                                const ByteBuffer& pinMaterial)
     {
-        SgxCryptStatus  status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
-        RSA*            rsaKey = nullptr;
-        bool            result = false;
+        SgxCryptStatus status     = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+        RSA*           rsaKey     = nullptr;
+        uint8_t*       encodedKey = nullptr;
+        bool           result     = false;
 
         do
         {
@@ -703,15 +1252,12 @@ namespace CryptoSgx
             BIGNUM *bn_n;
             BIGNUM *bn_e;
             BIGNUM *bn_d = nullptr;
-            BIGNUM *bn_p = nullptr;
-            BIGNUM *bn_q = nullptr;
 
             bn_d = BN_secure_new();
             bn_n = BN_bin2bn(modulusBuffer, modulusBufferLen, nullptr);
             bn_e = BN_bin2bn(exponentBuffer, exponentBufferLen, nullptr);
 
             RSA_set0_key(rsaKey, bn_n, bn_e, bn_d);
-            RSA_set0_factors(rsaKey, bn_p, bn_q);
 
             if (!BN_is_odd(bn_e) || BN_is_one(bn_e))
             {
@@ -719,14 +1265,49 @@ namespace CryptoSgx
                 status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
                 break;
             }
+
 #endif
             AsymmetricKey asymKey;
-            asymKey.key                 = rsaKey;
-            asymKey.pairKeyId           = 0;
-            asymKey.isUsedForWrapping   = false;
+            asymKey.key = rsaKey;
+
+            uint64_t encodedKeySize = 0;
+
+            std::string filePath;
+
+            if (attributeBuffer)
+            {
+                if (!encodeRsaKey(asymKey.key, &encodedKey, &encodedKeySize, true))
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+
+                std::string fileName = Utils::SgxFileUtils::generateRandomFilename();
+                if (fileName.empty())
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+
+                result = Utils::TokenObjectParser::writeTokenObject(fileName, pinMaterial, attributeBuffer, attributeBufferLen,
+                                                                    encodedKey, encodedKeySize, false, 0, &filePath);
+                if (!result)
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+
+                asymKey.keyFile = filePath;
+            }
 
             mAsymmetricPublicKeyCache.add(keyId, asymKey);
         } while (false);
+
+        if (encodedKey)
+        {
+            delete encodedKey;
+            encodedKey = nullptr;
+        }
 
         if (rsaKey && !result)
         {
@@ -754,16 +1335,16 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
-    SgxStatus AsymmetricCrypto::sign(const uint32_t&    keyId,
-                                     const uint8_t*     sourceBuffer,
-                                     const uint32_t&    sourceBufferLen,
-                                     uint8_t*           destBuffer,
-                                     size_t             destBufferLen,
-                                     uint32_t*          destBufferRequiredLength,
-                                     const uint32_t     hashAlgorithm,
-                                     const RsaPadding&  rsaPadding,
-                                     const HashMode&    hashMode,
-                                     const uint32_t&    salt)
+    SgxStatus AsymmetricCrypto::rsaSign(const uint32_t&    keyId,
+                                        const uint8_t*     sourceBuffer,
+                                        const uint32_t&    sourceBufferLen,
+                                        uint8_t*           destBuffer,
+                                        size_t             destBufferLen,
+                                        uint32_t*          destBufferRequiredLength,
+                                        const uint32_t     hashAlgorithm,
+                                        const RsaPadding&  rsaPadding,
+                                        const HashMode&    hashMode,
+                                        const uint32_t&    salt)
     {
         SgxCryptStatus       cryptStatus  = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
         SgxStatus            status       = 0;
@@ -910,15 +1491,438 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
-    SgxStatus AsymmetricCrypto::verifySign(const uint32_t&   keyId,
-                                           const uint8_t*    sourceBuffer,
-                                           const uint32_t&   sourceBufferLen,
-                                           const uint8_t*    signatureBuffer,
-                                           const uint32_t&   signatureBufferLen,
-                                           const uint32_t&   hashAlgorithm,
-                                           const RsaPadding& rsaPadding,
-                                           const HashMode&   hashMode,
-                                           const uint32_t&   salt)
+    static size_t getEcOrderLength(const EC_KEY* ecKey)
+    {
+        size_t len = 0;
+
+        if (!ecKey)
+        {
+            return len;
+        }
+
+        const EC_GROUP* ecGroup = EC_KEY_get0_group(ecKey);
+        if (!ecGroup)
+        {
+            return len;
+        }
+
+        BIGNUM* ecOrder = BN_new();
+        if (!ecOrder)
+        {
+            return len;
+        }
+
+        if (!EC_GROUP_get_order(ecGroup, ecOrder, nullptr))
+        {
+            BN_clear_free(ecOrder);
+            return len;
+        }
+
+        len = BN_num_bytes(ecOrder);
+        BN_clear_free(ecOrder);
+
+        return len;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::ecSign(const uint32_t& keyId,
+                                       const uint8_t*  sourceBuffer,
+                                       const uint32_t& sourceBufferLen,
+                                       uint8_t*        destBuffer,
+                                       size_t          destBufferLen,
+                                       uint32_t*       destBufferRequiredLength)
+    {
+        SgxStatus status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED);
+        bool      result = false;
+
+        do
+        {
+            result = destBufferRequiredLength && sourceBuffer && sourceBufferLen;
+
+            if (!result)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
+                break;
+            }
+
+            AsymmetricKey asymKey{};
+            result = getAsymmetricKey(keyId,
+                                      &asymKey,
+                                      OperationType::Private);
+
+            if (!result)
+            {
+                break;
+            }
+
+            EC_KEY* ecKey = asymKey.ecKey;
+            if (!ecKey)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE);
+                break;
+            }
+
+            EC_KEY_set_method(ecKey, EC_KEY_OpenSSL());
+
+            size_t len = getEcOrderLength(ecKey);
+
+            if (!len)
+            {
+                break;
+            }
+
+            if (!destBuffer)
+            {
+                *destBufferRequiredLength = 2 * len;
+
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
+                break;
+            }
+
+            if (destBufferLen < (2 * len))
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_BUFFER_TOO_SHORT);
+                break;
+            }
+
+            ECDSA_SIG *ecSign = ECDSA_do_sign(sourceBuffer, sourceBufferLen, ecKey);
+            if (!ecSign)
+            {
+                break;
+            }
+
+            const BIGNUM* bn_r = nullptr;
+            const BIGNUM* bn_s = nullptr;
+
+            ECDSA_SIG_get0(ecSign, &bn_r, &bn_s);
+
+            BN_bn2bin(bn_r, destBuffer + (len - BN_num_bytes(bn_r)));
+            BN_bn2bin(bn_s, destBuffer + (2 * len - BN_num_bytes(bn_s)));
+
+            ECDSA_SIG_free(ecSign);
+
+            *destBufferRequiredLength = 2 * len;
+
+            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
+        } while(false);
+
+        return status;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::edSign(const uint32_t& keyId,
+                                       const uint8_t*  sourceBuffer,
+                                       const uint32_t& sourceBufferLen,
+                                       uint8_t*        destBuffer,
+                                       size_t          destBufferLen,
+                                       uint32_t*       destBufferRequiredLength)
+    {
+        SgxStatus status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED);
+        bool      result = false;
+
+        do
+        {
+            result = destBufferRequiredLength && sourceBuffer && sourceBufferLen;
+
+            if (!result)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
+                break;
+            }
+
+            AsymmetricKey asymKey{};
+            result = getAsymmetricKey(keyId,
+                                      &asymKey,
+                                      OperationType::Private);
+
+            if (!result)
+            {
+                break;
+            }
+
+            EVP_PKEY* edKey = asymKey.edKey;
+            if (!edKey)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE);
+                break;
+            }
+
+            size_t len = 2 * ed25519KeyLength;
+
+            if (!destBuffer)
+            {
+                *destBufferRequiredLength = len;
+
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
+                break;
+            }
+
+            if (destBufferLen < len)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_BUFFER_TOO_SHORT);
+                break;
+            }
+
+            EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+            if (!ctx)
+            {
+                break;
+            }
+
+            EVP_PKEY_CTX *pKeyCtx;
+
+            int retValue = EVP_DigestSignInit(ctx, &pKeyCtx, nullptr, nullptr, edKey);
+            if (1 != retValue)
+            {
+                EVP_MD_CTX_free(ctx);
+                break;
+            }
+
+            if (1 != EVP_DigestSign(ctx, destBuffer, &len, sourceBuffer, sourceBufferLen))
+            {
+                EVP_MD_CTX_free(ctx);
+                break;
+            }
+
+            EVP_MD_CTX_free(ctx);
+
+            *destBufferRequiredLength = len;
+
+            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
+        } while(false);
+
+        return status;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::sign(const uint32_t&    keyId,
+                                     const uint8_t*     sourceBuffer,
+                                     const uint32_t&    sourceBufferLen,
+                                     uint8_t*           destBuffer,
+                                     size_t             destBufferLen,
+                                     uint32_t*          destBufferRequiredLength,
+                                     const uint32_t     hashAlgorithm,
+                                     const RsaPadding&  rsaPadding,
+                                     const HashMode&    hashMode,
+                                     const uint32_t&    salt)
+    {
+        SgxStatus status = 0;
+
+        if (mAsymmetricPrivateKeyCache.isRsaKey(keyId))
+        {
+            status = rsaSign(keyId,
+                             sourceBuffer,
+                             sourceBufferLen,
+                             destBuffer,
+                             destBufferLen,
+                             destBufferRequiredLength,
+                             hashAlgorithm,
+                             rsaPadding,
+                             hashMode,
+                             salt);
+        }
+        else if (mAsymmetricPrivateKeyCache.isEcKey(keyId))
+        {
+            status = ecSign(keyId,
+                            sourceBuffer,
+                            sourceBufferLen,
+                            destBuffer,
+                            destBufferLen,
+                            destBufferRequiredLength);
+        }
+        else if (mAsymmetricPrivateKeyCache.isEdKey(keyId))
+        {
+            status = edSign(keyId,
+                            sourceBuffer,
+                            sourceBufferLen,
+                            destBuffer,
+                            destBufferLen,
+                            destBufferRequiredLength);
+        }
+        else
+        {
+            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE);
+        }
+
+        return static_cast<SgxStatus>(status);
+    }
+
+#ifdef EC_VERIFY
+    //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::ecVerify(const uint32_t& keyId,
+                                         const uint8_t*  sourceBuffer,
+                                         const uint32_t& sourceBufferLen,
+                                         const uint8_t*  signatureBuffer,
+                                         const uint32_t& signatureBufferLen)
+    {
+        SgxStatus status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED);
+        bool      result = false;
+
+        do
+        {
+            result = sourceBufferLen &&
+                     sourceBuffer    &&
+                     signatureBuffer;
+
+            if (!result)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
+                break;
+            }
+
+            AsymmetricKey asymKey{};
+            result = getAsymmetricKey(keyId, &asymKey, OperationType::Public);
+
+            if (!result)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE);
+                break;
+            }
+
+            EC_KEY* ecKey = asymKey.ecKey;
+            if (!ecKey)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE);
+                break;
+            }
+
+            EC_KEY_set_method(ecKey, EC_KEY_OpenSSL());
+
+            size_t len = getEcOrderLength(ecKey);
+
+            if (!len)
+            {
+                break;
+            }
+
+            if ((2 * len) != signatureBufferLen)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_SIGNATURE_LENGTH);
+                break;
+            }
+
+            ECDSA_SIG* ecSign = ECDSA_SIG_new();
+            if (!ecSign)
+            {
+                break;
+            }
+
+            BIGNUM* bn_r = BN_bin2bn(signatureBuffer, len, nullptr);
+            BIGNUM* bn_s = BN_bin2bn(signatureBuffer + len, len, nullptr);
+
+            if (!bn_r || !bn_s || !ECDSA_SIG_set0(ecSign, bn_r, bn_s))
+            {
+                ECDSA_SIG_free(ecSign);
+                break;
+            }
+
+            int verifyStatus = ECDSA_do_verify(sourceBuffer, sourceBufferLen, ecSign, ecKey);
+
+            ECDSA_SIG_free(ecSign);
+
+            if (!verifyStatus)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_SIGNATURE);
+
+            }
+            else if(-1 == verifyStatus)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED);
+            }
+            else
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
+            }
+        } while(false);
+
+        return status;
+    }
+#endif
+
+#ifdef ED_VERIFY
+    //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::edVerify(const uint32_t& keyId,
+                                         const uint8_t*  sourceBuffer,
+                                         const uint32_t& sourceBufferLen,
+                                         const uint8_t*  signatureBuffer,
+                                         const uint32_t& signatureBufferLen)
+    {
+        SgxStatus status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED);
+        bool      result = false;
+
+        do
+        {
+            result = sourceBufferLen &&
+                     sourceBuffer    &&
+                     signatureBuffer;
+
+            if (!result)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
+                break;
+            }
+
+            AsymmetricKey asymKey{};
+            result = getAsymmetricKey(keyId, &asymKey, OperationType::Public);
+
+            if (!result)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE);
+                break;
+            }
+
+            EVP_PKEY* edKey = asymKey.edKey;
+            if (!edKey)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE);
+                break;
+            }
+
+            size_t len = 2 * ed25519KeyLength;
+
+            if (len != signatureBufferLen)
+            {
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_SIGNATURE_LENGTH);
+                break;
+            }
+
+            EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+            if (!ctx)
+            {
+                break;
+            }
+
+            if (!EVP_DigestVerifyInit(ctx, nullptr, nullptr, nullptr, edKey))
+            {
+                EVP_MD_CTX_free(ctx);
+                break;
+            }
+
+            if (1 != EVP_DigestVerify(ctx, signatureBuffer, signatureBufferLen, sourceBuffer, sourceBufferLen))
+            {
+                EVP_MD_CTX_free(ctx);
+                break;
+            }
+
+            EVP_MD_CTX_free(ctx);
+
+            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
+        } while(false);
+
+        return status;
+    }
+#endif
+
+    //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::rsaVerify(const uint32_t&   keyId,
+                                          const uint8_t*    sourceBuffer,
+                                          const uint32_t&   sourceBufferLen,
+                                          const uint8_t*    signatureBuffer,
+                                          const uint32_t&   signatureBufferLen,
+                                          const uint32_t&   hashAlgorithm,
+                                          const RsaPadding& rsaPadding,
+                                          const HashMode&   hashMode,
+                                          const uint32_t&   salt)
     {
         SgxCryptStatus       cryptStatus  = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
         SgxStatus            status       = 0;
@@ -1090,6 +2094,63 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::verifySign(const uint32_t&   keyId,
+                                           const uint8_t*    sourceBuffer,
+                                           const uint32_t&   sourceBufferLen,
+                                           const uint8_t*    signatureBuffer,
+                                           const uint32_t&   signatureBufferLen,
+                                           const uint32_t&   hashAlgorithm,
+                                           const RsaPadding& rsaPadding,
+                                           const HashMode&   hashMode,
+                                           const uint32_t&   salt)
+    {
+        SgxStatus status = 0;
+
+        if (mAsymmetricPublicKeyCache.isRsaKey(keyId))
+        {
+            status = rsaVerify(keyId,
+                               sourceBuffer,
+                               sourceBufferLen,
+                               signatureBuffer,
+                               signatureBufferLen,
+                               hashAlgorithm,
+                               rsaPadding,
+                               hashMode,
+                               salt);
+        }
+        else if (mAsymmetricPublicKeyCache.isEcKey(keyId))
+        {
+#ifdef EC_VERIFY
+            status = ecVerify(keyId,
+                              sourceBuffer,
+                              sourceBufferLen,
+                              signatureBuffer,
+                              signatureBufferLen);
+#else
+            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE);
+#endif
+        }
+        else if (mAsymmetricPublicKeyCache.isEdKey(keyId))
+        {
+#ifdef ED_VERIFY
+            status = edVerify(keyId,
+                              sourceBuffer,
+                              sourceBufferLen,
+                              signatureBuffer,
+                              signatureBufferLen);
+#else
+            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE);
+#endif
+        }
+        else
+        {
+            status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE);
+        }
+
+        return static_cast<SgxStatus>(status);
+    }
+
+    //---------------------------------------------------------------------------------------------
     bool AsymmetricCrypto::signHashPss(const AsymmetricKey& asymKey,
                                        const uint8_t*       sourceBuffer,
                                        uint8_t*             destBuffer,
@@ -1241,407 +2302,6 @@ namespace CryptoSgx
     }
 
     //---------------------------------------------------------------------------------------------
-    SgxStatus AsymmetricCrypto::exportAsymmetricKeyPbind(const uint32_t&  keyId,
-                                                         uint8_t*         destBuffer,
-                                                         const uint32_t&  destBufferLen,
-                                                         uint32_t*        destBufferWritten)
-    {
-        bool            result = false;
-        SgxCryptStatus  status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        AsymmetricKey   asymKey{};
-
-        do
-        {
-            if (!keyId)
-            {
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE;
-                break;
-            }
-
-            if (!destBufferWritten)
-            {
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
-                break;
-            }
-
-            result = getAsymmetricKey(keyId,
-                                      &asymKey,
-                                      OperationType::Public);
-
-            if (!result || !asymKey.key)
-            {
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE;
-                break;
-            }
-
-            result = exportPlatformBoundKey(asymKey,
-                                            destBuffer,
-                                            destBufferLen,
-                                            destBufferWritten,
-                                            &status);
-        } while (false);
-
-        if (result)
-        {
-            status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        }
-
-        return static_cast<SgxStatus>(status);
-    }
-
-    //---------------------------------------------------------------------------------------------
-    bool AsymmetricCrypto::exportPlatformBoundKey(const AsymmetricKey&  asymKey,
-                                                  uint8_t*              destBuffer,
-                                                  const uint32_t&       destBufferLen,
-                                                  uint32_t*             destBufferWritten,
-                                                  SgxCryptStatus*       status)
-    {
-        bool        result                  = false;
-        uint8_t*    encodedKey              = nullptr;
-        bool        onlyPublicKeyPresent    = false;
-        int         encodedKeySize          = 0;
-        uint32_t    pbindInputDataSize      = 0;
-        uint32_t    sealDataSize            = 0;
-        int         bytesWritten            = 0;
-
-        if (!status)
-        {
-            return false;
-        }
-
-        do
-        {
-            if (!asymKey.key)
-            {
-                *status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE;
-                break;
-            }
-
-            if (!destBufferWritten)
-            {
-                *status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
-                break;
-            }
-
-
-            // All the RSA handles stored in table has public component.
-            // Check whether it also have the private key component & encode accordingly.
-            if (hasPrivateKey(asymKey))
-            {
-                // Both public & private keys can be encoded
-                encodedKeySize = i2d_RSAPrivateKey(asymKey.key, nullptr);
-            }
-            else
-            {
-                // Only public key can be encoded
-                onlyPublicKeyPresent = true;
-                encodedKeySize = i2d_RSAPublicKey(asymKey.key, nullptr);
-            }
-
-            if (encodedKeySize < 0)
-            {
-                *status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
-                break;
-            }
-
-            pbindInputDataSize = encodedKeySize + sizeof(asymKey.isUsedForWrapping);
-            sealDataSize       = sgx_calc_sealed_data_size(0, pbindInputDataSize);
-
-            if (UINT32_MAX == sealDataSize)
-            {
-                *status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
-                break;
-            }
-            else
-            {
-                *destBufferWritten = sealDataSize;
-                if (!destBuffer)
-                {
-                    result = true;
-                    break;
-                }
-
-                if (destBufferLen < sealDataSize)
-                {
-                    result = false;
-                    *status = SgxCryptStatus::SGX_CRYPT_STATUS_BUFFER_TOO_SHORT;
-                    break;
-                }
-
-                encodedKey = new (std::nothrow) uint8_t[encodedKeySize];
-                if (!encodedKey)
-                {
-                    result = false;
-                    *status = SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY;
-                    break;
-                }
-
-                bytesWritten = getEncodedKey(asymKey, &encodedKey, onlyPublicKeyPresent);
-
-                if (bytesWritten < 0)
-                {
-                    result = false;
-                    *status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
-                    break;
-                }
-                // Reset the pointer to initial value as the i2d call incremented it.
-                encodedKey -= (bytesWritten);
-
-                std::unique_ptr<uint8_t[]> dataToBePlatformBound(new (std::nothrow) uint8_t[pbindInputDataSize]);
-                if (!dataToBePlatformBound.get())
-                {
-                    result = false;
-                    *status = SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY;
-                    break;
-                }
-
-                memcpy_s(dataToBePlatformBound.get(),
-                         pbindInputDataSize,
-                         encodedKey,
-                         bytesWritten);
-                memcpy_s(dataToBePlatformBound.get() + bytesWritten,
-                         pbindInputDataSize - bytesWritten,
-                         &asymKey.isUsedForWrapping,
-                         sizeof(asymKey.isUsedForWrapping));
-
-                // Seal the encoded RSA Key with SGX
-                const sgx_status_t sgxStatus = sgx_seal_data(0, nullptr,
-                                                             pbindInputDataSize,
-                                                             dataToBePlatformBound.get(),
-                                                             sealDataSize,
-                                                             reinterpret_cast<sgx_sealed_data_t*>(destBuffer));
-
-                result = (sgx_status_t::SGX_SUCCESS == sgxStatus);
-
-                if (!result)
-                {
-                    *status = SgxCryptStatus::SGX_CRYPT_STATUS_SEALED_DATA_FAILED;
-                    *destBufferWritten = 0;
-                    break;
-                }
-            }
-        } while (false);
-
-        if (encodedKey)
-        {
-            delete[] encodedKey;
-            encodedKey = nullptr;
-        }
-
-        return result;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    SgxStatus AsymmetricCrypto::importAsymmetricKeyPbind(uint32_t*          publicKeyId,
-                                                         uint32_t*          privateKeyId,
-                                                         const uint8_t*     sourceBuffer,
-                                                         const uint32_t&    sourceBufferLen)
-    {
-        bool            result = false;
-        SgxCryptStatus  status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-
-        do
-        {
-            if (!publicKeyId)
-            {
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE;
-                break;
-            }
-
-            if (static_cast<SgxMaxKeyLimits>(mAsymmetricPublicKeyCache.count()) >= SgxMaxKeyLimits::asymmetric)
-            {
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_KEY_TABLE_FULL;
-                break;
-            }
-
-            /* Restricting sourceBuffer(platform bound data) whose length is more than the
-               maximum allowed RSA platform bind length.*/
-            if (sourceBufferLen > rsaMaxPBindDataLength)
-            {
-                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_BUFFER_SIZE;
-                break;
-            }
-
-            AsymmetricKey asymKey{};
-
-            result = importPlatformBoundKey(&asymKey, sourceBuffer, sourceBufferLen, &status);
-
-            if (!result)
-            {
-                break;
-            }
-
-            const BIGNUM *bn_n = nullptr;
-            const BIGNUM *bn_e = nullptr;
-            const BIGNUM *bn_d = nullptr;
-            const BIGNUM *bn_p = nullptr;
-            const BIGNUM *bn_q = nullptr;
-
-            RSA_get0_factors(asymKey.key, &bn_p, &bn_q);
-            RSA_get0_key(asymKey.key, &bn_n, &bn_e, &bn_d);
-
-            if (bn_d && bn_p && bn_q)
-            {
-                asymKey.pairKeyId = *publicKeyId;
-                mAsymmetricPrivateKeyCache.add(*privateKeyId, asymKey);
-            }
-            else
-            {
-                *privateKeyId = 0;
-            }
-
-            asymKey.pairKeyId = *privateKeyId;
-            mAsymmetricPublicKeyCache.add(*publicKeyId, asymKey);
-
-        } while (false);
-
-        if (result)
-        {
-            status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-        }
-
-        return static_cast<SgxStatus>(status);
-    }
-
-    //---------------------------------------------------------------------------------------------
-    void AsymmetricCrypto::markAsWrappingKey(const uint32_t& keyId)
-    {
-        const bool result = mAsymmetricPublicKeyCache.find(keyId);
-
-        if (result)
-        {
-            AsymmetricKey asymKey     = mAsymmetricPublicKeyCache.get(keyId);
-            asymKey.isUsedForWrapping = true;
-            mAsymmetricPublicKeyCache.add(keyId, asymKey);
-        }
-    }
-
-    //---------------------------------------------------------------------------------------------
-    bool AsymmetricCrypto::checkWrappingStatus(const uint32_t& keyId)
-    {
-        bool result = mAsymmetricPublicKeyCache.find(keyId);
-
-        if (result)
-        {
-            AsymmetricKey asymKey = mAsymmetricPublicKeyCache.get(keyId);
-            result                = asymKey.isUsedForWrapping;
-        }
-
-        return result;
-    }
-
-    //---------------------------------------------------------------------------------------------
-    bool AsymmetricCrypto::importPlatformBoundKey(AsymmetricKey*     asymKey,
-                                                  const uint8_t*     sourceBuffer,
-                                                  const uint32_t&    sourceBufferLen,
-                                                  SgxCryptStatus*    status)
-    {
-        bool        result              = true;
-        bool        isUsedForWrapping   = false;
-        uint8_t*    encodedKey          = nullptr;
-        uint32_t    encodedKeySize      = 0;
-        uint32_t    decryptedDataSize   = 0;
-
-        if (!status || !asymKey)
-        {
-            return false;
-        }
-
-        do
-        {
-            *status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-            if (!sourceBuffer || !sourceBufferLen)
-            {
-                result = false;
-                *status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
-                break;
-            }
-
-            decryptedDataSize = sgx_get_encrypt_txt_len(reinterpret_cast<const sgx_sealed_data_t*>(sourceBuffer));
-
-            /* For sourceBuffer which is not a platform bound data, sgx_get_encrypt_txt_len() does not return
-               UINT32_MAX as per the api documentation. Hence, a bound is placed on the return value of
-               sgx_get_encrypt_txt_len() based on maximum supported RSA public+private key.*/
-            if (UINT32_MAX == decryptedDataSize || encodedKeySize > rsaMaxUnsealDataLength)
-            {
-                result = false;
-                *status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_BUFFER_SIZE;
-                break;
-            }
-
-            std::unique_ptr<uint8_t[]> decryptedData(new (std::nothrow) uint8_t[decryptedDataSize], std::default_delete<uint8_t[]>());
-
-            if (!decryptedData.get())
-            {
-                result = false;
-                *status = SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY;
-                break;
-            }
-
-            const sgx_status_t sgxStatus = sgx_unseal_data(reinterpret_cast<const sgx_sealed_data_t*>(sourceBuffer),
-                                                           nullptr,
-                                                           nullptr,
-                                                           decryptedData.get(),
-                                                           &decryptedDataSize);
-            if (sgx_status_t::SGX_SUCCESS != sgxStatus)
-            {
-                result = false;
-                *status = SgxCryptStatus::SGX_CRYPT_STATUS_SEALED_DATA_FAILED;
-                break;
-            }
-
-            encodedKeySize = decryptedDataSize - sizeof(asymKey->isUsedForWrapping);
-            encodedKey     = new (std::nothrow) uint8_t[encodedKeySize];
-
-            if (!encodedKey)
-            {
-                result = false;
-                *status = SgxCryptStatus::SGX_CRYPT_STATUS_OUT_OF_MEMORY;
-                break;
-            }
-
-            memcpy_s(encodedKey, encodedKeySize, decryptedData.get(), encodedKeySize);
-
-            isUsedForWrapping = static_cast<bool>(*(decryptedData.get() + encodedKeySize));
-
-            // Load the RSA struct with the encoded key pair
-            if (nullptr == d2i_RSAPrivateKey(&asymKey->key,
-                                             const_cast<const unsigned char**>(&encodedKey),
-                                             encodedKeySize))
-            {
-                // Check whether it has at least the public key
-                if (nullptr == d2i_RSAPublicKey(&asymKey->key,
-                                                const_cast<const unsigned char**>(&encodedKey),
-                                                encodedKeySize))
-                {
-                    result = false;
-                    *status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_WRAPPED_KEY;
-                    break;
-                }
-            }
-
-            asymKey->isUsedForWrapping = isUsedForWrapping;
-            // Reset the pointer to initial value as the d2i call incremented it.
-            encodedKey -= encodedKeySize;
-        } while (false);
-
-        if (encodedKey)
-        {
-            memset_s(encodedKey, encodedKeySize, 0, encodedKeySize);
-            delete[] encodedKey;
-            encodedKey = nullptr;
-        }
-
-        if (asymKey->key && (SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS != *status))
-        {
-            result = false;
-            RSA_free(asymKey->key);
-        }
-
-        return result;
-    }
-
-    //---------------------------------------------------------------------------------------------
     SgxStatus AsymmetricCrypto::getPublicKeyHash(const uint32_t&    keyId,
                                                  uint8_t*           destBuffer,
                                                  const uint32_t&    destBufferLen,
@@ -1667,12 +2327,7 @@ namespace CryptoSgx
 
             const AsymmetricKey asymKey = mAsymmetricPublicKeyCache.get(keyId);
 
-            if (!asymKey.pairKeyId || !mAsymmetricPrivateKeyCache.find(asymKey.pairKeyId))
-            {
-                return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE);
-            }
-
-            status = exportPublicKey(keyId, NULL, 0, &cbModulus, &cbPublicExp);
+            status = exportPublicKey(keyId, nullptr, 0, &cbModulus, &cbPublicExp);
             if (static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS) != status)
             {
                 break;
@@ -1734,4 +2389,981 @@ namespace CryptoSgx
 
         return status;
     }
+
+    //---------------------------------------------------------------------------------------------
+    static std::vector<uint8_t> getEcPublicKey(const EC_KEY*   ecKey,
+                                               const EC_GROUP* ecGroup)
+    {
+        bool                 result       = false;
+        uint64_t             publicKeyLen = 0;
+        std::vector<uint8_t> publicKey{};
+
+        do
+        {
+            if (!ecKey || !ecGroup)
+            {
+                break;
+            }
+
+            const EC_POINT* ecPoint = EC_KEY_get0_public_key(ecKey);
+            if (!ecPoint)
+            {
+                break;
+            }
+
+            size_t point_length = EC_POINT_point2oct(ecGroup,
+                                                     ecPoint,
+                                                     POINT_CONVERSION_UNCOMPRESSED,
+                                                     nullptr,
+                                                     0,
+                                                     nullptr);
+
+            // Definite, short
+            if (point_length <= 0x7f)
+            {
+                publicKeyLen = 2 + point_length;
+
+                publicKey.resize(publicKeyLen);
+
+                unsigned char *derQ = publicKey.data();
+                derQ[0] = V_ASN1_OCTET_STRING;
+                derQ[1] = point_length & 0x7f;
+                result = EC_POINT_point2oct(ecGroup,
+                                            ecPoint,
+                                            POINT_CONVERSION_UNCOMPRESSED,
+                                            publicKey.data() + 2,
+                                            point_length,
+                                            nullptr);
+                if (!result)
+                {
+                    break;
+                }
+            }
+            // Definite, long
+            else
+            {
+                // Count significate bytes
+                size_t bytes = sizeof(size_t);
+                for(; bytes > 0; bytes--)
+                {
+                    size_t value = point_length >> ((bytes - 1) * 8);
+                    if (value & 0xFF) break;
+                }
+
+                publicKeyLen = 2 + bytes + point_length;
+                publicKey.resize(publicKeyLen);
+
+                unsigned char *derQ = publicKey.data();
+                derQ[0] = V_ASN1_OCTET_STRING;
+                derQ[1] = 0x80 | bytes;
+
+                size_t len = point_length;
+                size_t offset = 0;
+                for (size_t i = 1; i <= bytes; i++)
+                {
+                    offset = 2 + bytes - i;
+                    publicKey[offset] = (unsigned char) (len & 0xFF);
+                    len >>= 8;
+                }
+
+                offset = 2 + bytes;
+                result = EC_POINT_point2oct(ecGroup,
+                                            ecPoint,
+                                            POINT_CONVERSION_UNCOMPRESSED,
+                                            publicKey.data() + offset,
+                                            point_length,
+                                            nullptr);
+                if (!result)
+                {
+                    break;
+                }
+            }
+
+            result = true;
+        } while(false);
+
+        if (!result)
+        {
+            publicKey.resize(0);
+        }
+
+        return publicKey;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    static std::vector<uint8_t> getEncodedEcKey(const EC_KEY* ecKey)
+    {
+        std::vector<uint8_t> encodedKey;
+
+        do
+        {
+            if (!ecKey)
+            {
+                break;
+            }
+
+            // Extract private key
+            const EC_GROUP* ecGroup = EC_KEY_get0_group(ecKey);
+            if (!ecGroup)
+            {
+                break;
+            }
+
+            const BIGNUM* ecPrivateKey = EC_KEY_get0_private_key(ecKey);
+            if (!ecPrivateKey)
+            {
+                break;
+            }
+
+            uint8_t privateKeyLen = BN_num_bytes(ecPrivateKey);
+
+            // Extract der params
+            std::vector<uint8_t> derParams;
+            derParams.resize(i2d_ECPKParameters(ecGroup, nullptr));
+
+            size_t derParamsLen = derParams.size();
+
+            unsigned char *derPtr = derParams.data();
+            if (!i2d_ECPKParameters(ecGroup, &derPtr))
+            {
+                break;
+            }
+
+            // Extract public key
+            std::vector<uint8_t> publicKey = getEcPublicKey(ecKey, ecGroup);
+            if (publicKey.empty())
+            {
+                break;
+            }
+
+            size_t publicKeyLen = publicKey.size();
+
+            // Allocate memory for public key, private key and derParams.
+            size_t offset = 3; // Allocate 3 extra bytes for sizes.
+            encodedKey.resize(offset + privateKeyLen + publicKeyLen + derParamsLen);
+
+            // Copy the sizes
+            offset = 0;
+            encodedKey[offset++] = privateKeyLen;
+            encodedKey[offset++] = derParamsLen;
+            encodedKey[offset++] = publicKeyLen;
+
+            // Copy private key
+            BN_bn2bin(ecPrivateKey, encodedKey.data() + offset);
+            offset += privateKeyLen;
+
+            // Copy der params
+            memcpy_s(encodedKey.data() + offset, derParamsLen, derParams.data(), derParamsLen);
+            offset += derParamsLen;
+
+            // Copy encoded public key
+            memcpy_s(encodedKey.data() + offset, publicKeyLen, publicKey.data(), publicKeyLen);
+
+        } while(false);
+
+        return encodedKey;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    static std::vector<uint8_t> getEncodedEdKey(EVP_PKEY* edKey)
+    {
+        std::vector<uint8_t> encodedKey;
+
+        do
+        {
+            if (!edKey)
+            {
+                break;
+            }
+
+            // Extract der params
+            std::vector<uint8_t> derParams;
+
+            int nid = EVP_PKEY_id(edKey);
+            derParams.resize(i2d_ASN1_OBJECT(OBJ_nid2obj(nid), nullptr));
+
+            size_t derParamsLen = derParams.size();
+
+            unsigned char *derPtr = derParams.data();
+            if (!i2d_ASN1_OBJECT(OBJ_nid2obj(nid), &derPtr))
+            {
+                break;
+            }
+
+            // Extract public key
+            size_t publicKeyLen = 0;
+
+            if (1 != EVP_PKEY_get_raw_public_key(edKey, nullptr, &publicKeyLen))
+            {
+                break;
+            }
+
+            if (ed25519KeyLength != publicKeyLen)
+            {
+                break;
+            }
+
+            std::vector<uint8_t> edPublicKey(publicKeyLen);
+            if (1 != EVP_PKEY_get_raw_public_key(edKey, edPublicKey.data(), &publicKeyLen))
+            {
+                break;
+            }
+
+            // Extract private key
+            size_t privateKeyLen = 0;
+
+            if (1 != EVP_PKEY_get_raw_private_key(edKey, nullptr, &privateKeyLen))
+            {
+                break;
+            }
+
+            if (ed25519KeyLength != privateKeyLen)
+            {
+                break;
+            }
+
+            std::vector<uint8_t> edPrivateKey(privateKeyLen);
+            if (1 != EVP_PKEY_get_raw_private_key(edKey, edPrivateKey.data(), &privateKeyLen))
+            {
+                break;
+            }
+
+            // Allocate memory for public key, private key and derParams.
+            size_t offset = 3; // Allocate 3 extra bytes for sizes.
+            encodedKey.resize(offset + privateKeyLen + publicKeyLen + derParamsLen);
+
+            // Copy the sizes
+            offset = 0;
+            encodedKey[offset++] = privateKeyLen;
+            encodedKey[offset++] = derParamsLen;
+            encodedKey[offset++] = publicKeyLen;
+
+            // Copy private key
+            memcpy_s(encodedKey.data() + offset, privateKeyLen, edPrivateKey.data(), privateKeyLen);
+            offset += privateKeyLen;
+
+            // Copy der params
+            memcpy_s(encodedKey.data() + offset, derParamsLen, derParams.data(), derParamsLen);
+            offset += derParamsLen;
+
+            // Copy encoded public key
+            memcpy_s(encodedKey.data() + offset, publicKeyLen, edPublicKey.data(), publicKeyLen);
+
+        } while(false);
+
+        return encodedKey;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::updateKeyFile(const uint32_t&   keyId,
+                                              const uint8_t&    keyType,
+                                              const uint64_t*   attributeBuffer,
+                                              const uint64_t&   attributeBufferLen,
+                                              const ByteBuffer& pinMaterial)
+    {
+        SgxCryptStatus       status     = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+        bool                 result     = keyId;
+        uint8_t*             encodedKey = nullptr;
+        std::vector<uint8_t> encodedEccKey;
+
+        do
+        {
+            result = keyId;
+            if (!result)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
+                break;
+            }
+
+            AsymmetricKey asymKey{};
+            result = getAsymmetricKey(keyId, &asymKey, OperationType::Any);
+
+            if (!result)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE;
+                break;
+            }
+
+            std::string filePath = asymKey.keyFile;
+            if (filePath.empty())
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                break;
+            }
+
+            uint64_t encodedKeySize = 0;
+
+            if (static_cast<uint8_t>(KeyType::Rsa) == keyType)
+            {
+                if (!encodeRsaKey(asymKey.key, &encodedKey, &encodedKeySize))
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+            }
+            else if (static_cast<uint8_t>(KeyType::Ec) == keyType)
+            {
+                encodedEccKey = getEncodedEcKey(asymKey.ecKey);
+                if (encodedEccKey.empty())
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+
+                encodedKey = encodedEccKey.data();
+                encodedKeySize = encodedEccKey.size();
+            }
+            else if (static_cast<uint8_t>(KeyType::Ed) == keyType)
+            {
+                encodedEccKey = getEncodedEdKey(asymKey.edKey);
+                if (encodedEccKey.empty())
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+
+                encodedKey = encodedEccKey.data();
+                encodedKeySize = encodedEccKey.size();
+            }
+            else
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
+                break;
+            }
+
+            std::string newFileName = Utils::SgxFileUtils::generateRandomFilename();
+            if (newFileName.empty())
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                break;
+            }
+
+            std::string newFilePath;
+
+            result = Utils::TokenObjectParser::writeTokenObject(newFileName, pinMaterial, attributeBuffer, attributeBufferLen,
+                                                                encodedKey, encodedKeySize, asymKey.isUsedForWrapping, asymKey.pairKeyId, &newFilePath);
+            if (!result)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                break;
+            }
+
+            Utils::SgxFileUtils::remove(filePath);
+
+            asymKey.keyFile = newFilePath;
+
+            if (mAsymmetricPublicKeyCache.find(keyId))
+            {
+                mAsymmetricPublicKeyCache.add(keyId, asymKey);
+            }
+            else if (mAsymmetricPrivateKeyCache.find(keyId))
+            {
+                mAsymmetricPrivateKeyCache.add(keyId, asymKey);
+            }
+
+        } while(false);
+
+        if ((static_cast<uint8_t>(KeyType::Rsa) == keyType) && encodedKey)
+        {
+            delete encodedKey;
+            encodedKey = nullptr;
+        }
+
+        return static_cast<SgxStatus>(status);
+    }
+
+    //--------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::updateHandle(const uint32_t& keyHandle, const uint32_t& newKeyHandle)
+    {
+        SgxCryptStatus status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+        AsymmetricKey  asymmetricKey{};
+        bool           removeTokenFile = false;
+
+        if (!newKeyHandle)
+        {
+            return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
+        }
+
+        if (mAsymmetricPrivateKeyCache.find(keyHandle))
+        {
+            asymmetricKey = mAsymmetricPrivateKeyCache.get(keyHandle);
+
+            mAsymmetricPrivateKeyCache.add(newKeyHandle, asymmetricKey);
+
+            if (!mAsymmetricPrivateKeyCache.remove(keyHandle, removeTokenFile))
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
+            }
+        }
+        else if (mAsymmetricPublicKeyCache.find(keyHandle))
+        {
+            asymmetricKey = mAsymmetricPublicKeyCache.get(keyHandle);
+
+            mAsymmetricPublicKeyCache.add(newKeyHandle, asymmetricKey);
+
+            if (!mAsymmetricPublicKeyCache.remove(keyHandle, removeTokenFile))
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
+            }
+        }
+        else
+        {
+            status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE;
+        }
+
+        return static_cast<SgxStatus>(status);
+    }
+
+    //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::generateEccKey(const uint32_t&      publicKeyId,
+                                               const uint32_t&      privateKeyId,
+                                               const unsigned char* curveOid,
+                                               const uint32_t&      curveOidLen,
+                                               const uint64_t*      attributeBufferPublic,
+                                               const uint64_t&      attributeBufferPublicLen,
+                                               const uint64_t*      attributeBufferPrivate,
+                                               const uint64_t&      attributeBufferPrivateLen,
+                                               const ByteBuffer&    pinMaterial)
+    {
+        SgxStatus status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL);
+
+        if (!curveOid || !curveOidLen)
+        {
+            return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
+        }
+
+        if (static_cast<SgxMaxKeyLimits>(mAsymmetricPublicKeyCache.count()) >= SgxMaxKeyLimits::asymmetric)
+        {
+            return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_KEY_TABLE_FULL);
+        }
+
+        if (static_cast<SgxMaxKeyLimits>(mAsymmetricPrivateKeyCache.count()) >= SgxMaxKeyLimits::asymmetric)
+        {
+            return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_KEY_TABLE_FULL);
+        }
+
+        std::vector<uint8_t> tempCurveOid(curveOid, curveOid + curveOidLen);
+        const unsigned char* oidPtr = reinterpret_cast<const unsigned char*>(tempCurveOid.data());
+
+        int curveNid = OBJ_obj2nid(d2i_ASN1_OBJECT(nullptr, &oidPtr, tempCurveOid.size()));
+        switch(curveNid)
+        {
+            case NID_X9_62_prime256v1:
+            case NID_secp384r1:
+                status = generateEcKey(publicKeyId, privateKeyId,
+                                       curveOid, curveOidLen,
+                                       attributeBufferPublic,  attributeBufferPublicLen,
+                                       attributeBufferPrivate, attributeBufferPrivateLen,
+                                       pinMaterial);
+                break;
+
+            case EVP_PKEY_ED25519:
+                status = generateEdKey(publicKeyId, privateKeyId,
+                                       curveOid, curveOidLen,
+                                       attributeBufferPublic,  attributeBufferPublicLen,
+                                       attributeBufferPrivate, attributeBufferPrivateLen,
+                                       pinMaterial);
+                break;
+
+            default:
+                status = static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER);
+                break;
+        }
+
+        return status;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::generateEcKey(const uint32_t&      publicKeyId,
+                                              const uint32_t&      privateKeyId,
+                                              const unsigned char* curveOid,
+                                              const uint32_t&      curveOidLen,
+                                              const uint64_t*      attributeBufferPublic,
+                                              const uint64_t&      attributeBufferPublicLen,
+                                              const uint64_t*      attributeBufferPrivate,
+                                              const uint64_t&      attributeBufferPrivateLen,
+                                              const ByteBuffer&    pinMaterial)
+    {
+        SgxCryptStatus status  = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+        bool           result  = false;
+        std::string    filePathPublicKey, filePathPrivateKey;
+
+        do
+        {
+            result = publicKeyId && privateKeyId && curveOid && curveOidLen;
+
+            if (!result)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
+                break;
+            }
+
+            if (static_cast<SgxMaxKeyLimits>(mAsymmetricPublicKeyCache.count()) >= SgxMaxKeyLimits::asymmetric)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_KEY_TABLE_FULL;
+                break;
+            }
+
+            std::vector<uint8_t> tempCurveOid(curveOid, curveOid + curveOidLen);
+            const unsigned char* ptr = reinterpret_cast<const unsigned char*>(tempCurveOid.data());
+
+            int curveNid = OBJ_obj2nid(d2i_ASN1_OBJECT(nullptr, &ptr, tempCurveOid.size()));
+            if ((NID_X9_62_prime256v1 != curveNid) && (NID_secp384r1 != curveNid))
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
+                break;
+            }
+
+            EC_KEY* ecKey = EC_KEY_new();
+            if (!ecKey)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
+                break;
+            }
+
+            EC_GROUP* ecGroup = d2i_ECPKParameters(nullptr, &curveOid, curveOidLen);
+            EC_KEY_set_group(ecKey, ecGroup);
+            EC_GROUP_free(ecGroup);
+
+            if (!EC_KEY_generate_key(ecKey))
+            {
+                EC_KEY_free(ecKey);
+
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
+                break;
+            }
+
+            uint64_t pairKeyId = 0;
+            if (SGX_SUCCESS != sgx_read_rand(reinterpret_cast<unsigned char*>(&pairKeyId), sizeof(pairKeyId)))
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
+                break;
+            }
+
+            std::vector<uint8_t> encodedKey;
+
+            if (attributeBufferPublic || attributeBufferPrivate)
+            {
+                encodedKey = getEncodedEcKey(ecKey);
+                if (encodedKey.empty())
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+            }
+
+            if (attributeBufferPublic)
+            {
+                std::string fileName = Utils::SgxFileUtils::generateRandomFilename();
+                if (fileName.empty())
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+
+                result = Utils::TokenObjectParser::writeTokenObject(fileName, pinMaterial, attributeBufferPublic, attributeBufferPublicLen,
+                                                                    encodedKey.data(), encodedKey.size(), false, pairKeyId, &filePathPublicKey);
+                if (!result)
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+            }
+
+            if (attributeBufferPrivate)
+            {
+                std::string fileName = Utils::SgxFileUtils::generateRandomFilename();
+                if (fileName.empty())
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+
+                result = Utils::TokenObjectParser::writeTokenObject(fileName, pinMaterial, attributeBufferPrivate, attributeBufferPrivateLen,
+                                                                    encodedKey.data(), encodedKey.size(), false, pairKeyId, &filePathPrivateKey);
+                if (!result)
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+            }
+
+            AsymmetricKey asymKey{};
+
+            asymKey.ecKey = ecKey;
+
+            EC_KEY* dupEcKey = EC_KEY_dup(asymKey.ecKey);
+            if (!dupEcKey)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
+                break;
+            }
+
+            // Add public key into cache
+            asymKey.pairKeyId = pairKeyId;
+            asymKey.keyFile   = filePathPublicKey;
+            mAsymmetricPublicKeyCache.add(publicKeyId, asymKey);
+
+            // Add private key into cache
+            asymKey.ecKey   = dupEcKey;
+            asymKey.keyFile = filePathPrivateKey;
+            mAsymmetricPrivateKeyCache.add(privateKeyId, asymKey);
+
+            status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+        } while (false);
+
+        if (SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS != status)
+        {
+            Utils::SgxFileUtils::remove(filePathPublicKey);
+            Utils::SgxFileUtils::remove(filePathPrivateKey);
+        }
+
+        return static_cast<SgxStatus>(status);
+    }
+
+    //---------------------------------------------------------------------------------------------
+    static EVP_PKEY* getDuplicateEdKey(const EVP_PKEY* edKey)
+    {
+        if (!edKey)
+        {
+            return nullptr;
+        }
+
+        EVP_PKEY* dupEdKey;
+
+        size_t privateKeyLen = 0;
+
+        if (1 != EVP_PKEY_get_raw_private_key(edKey, nullptr, &privateKeyLen))
+        {
+            return nullptr;
+        }
+
+        if (ed25519KeyLength != privateKeyLen)
+        {
+            return nullptr;
+        }
+
+        std::vector<uint8_t> edPrivateKey(privateKeyLen);
+        if (1 != EVP_PKEY_get_raw_private_key(edKey, edPrivateKey.data(), &privateKeyLen))
+        {
+            return nullptr;
+        }
+
+        dupEdKey = EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, nullptr, edPrivateKey.data(), privateKeyLen);
+        if (!dupEdKey)
+        {
+            return nullptr;
+        }
+
+        return dupEdKey;
+    }
+
+    //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::generateEdKey(const uint32_t&      publicKeyId,
+                                              const uint32_t&      privateKeyId,
+                                              const unsigned char* curveOid,
+                                              const uint32_t&      curveOidLen,
+                                              const uint64_t*      attributeBufferPublic,
+                                              const uint64_t&      attributeBufferPublicLen,
+                                              const uint64_t*      attributeBufferPrivate,
+                                              const uint64_t&      attributeBufferPrivateLen,
+                                              const ByteBuffer&    pinMaterial)
+    {
+        SgxCryptStatus status  = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+        bool           result  = false;
+        std::string    filePathPublicKey, filePathPrivateKey;
+
+        do
+        {
+            result = publicKeyId && privateKeyId && curveOid && curveOidLen;
+
+            if (!result)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
+                break;
+            }
+
+            if (static_cast<SgxMaxKeyLimits>(mAsymmetricPublicKeyCache.count()) >= SgxMaxKeyLimits::asymmetric)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_KEY_TABLE_FULL;
+                break;
+            }
+
+            EVP_PKEY* edKey = nullptr;
+
+            int curveNid = OBJ_obj2nid(d2i_ASN1_OBJECT(nullptr, &curveOid, curveOidLen));
+            if (EVP_PKEY_ED25519 != curveNid)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
+                break;
+            }
+
+            EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_id(curveNid, nullptr);
+            if (!ctx)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
+                break;
+            }
+
+            result = (EVP_PKEY_keygen_init(ctx) == 1) && (EVP_PKEY_keygen(ctx, &edKey) == 1);
+
+            EVP_PKEY_CTX_free(ctx);
+
+            if (!result)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
+                break;
+            }
+
+            uint64_t pairKeyId = 0;
+            if (SGX_SUCCESS != sgx_read_rand(reinterpret_cast<unsigned char*>(&pairKeyId), sizeof(pairKeyId)))
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
+                break;
+            }
+
+            std::vector<uint8_t> encodedKey;
+
+            if (attributeBufferPublic || attributeBufferPrivate)
+            {
+                encodedKey = getEncodedEdKey(edKey);
+                if (encodedKey.empty())
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+            }
+
+            if (attributeBufferPublic)
+            {
+                std::string fileName = Utils::SgxFileUtils::generateRandomFilename();
+                if (fileName.empty())
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+
+                result = Utils::TokenObjectParser::writeTokenObject(fileName, pinMaterial, attributeBufferPublic, attributeBufferPublicLen,
+                                                                    encodedKey.data(), encodedKey.size(), false, pairKeyId, &filePathPublicKey);
+                if (!result)
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+            }
+
+            if (attributeBufferPrivate)
+            {
+                std::string fileName = Utils::SgxFileUtils::generateRandomFilename();
+                if (fileName.empty())
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+
+                result = Utils::TokenObjectParser::writeTokenObject(fileName, pinMaterial, attributeBufferPrivate, attributeBufferPrivateLen,
+                                                                    encodedKey.data(), encodedKey.size(), false, pairKeyId, &filePathPrivateKey);
+                if (!result)
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+                    break;
+                }
+            }
+
+            AsymmetricKey asymKey{};
+
+            asymKey.edKey = edKey;
+
+            EVP_PKEY* dupEdKey = getDuplicateEdKey(asymKey.edKey);
+            if (!dupEdKey)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED;
+                break;
+            }
+
+            // Add public key into cache
+            asymKey.pairKeyId = pairKeyId;
+            asymKey.keyFile   = filePathPublicKey;
+            mAsymmetricPublicKeyCache.add(publicKeyId, asymKey);
+
+            // Add private key into cache
+            asymKey.edKey   = dupEdKey;
+            asymKey.keyFile = filePathPrivateKey;
+            mAsymmetricPrivateKeyCache.add(privateKeyId, asymKey);
+
+            status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+        } while (false);
+
+        if (SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS != status)
+        {
+            Utils::SgxFileUtils::remove(filePathPublicKey);
+            Utils::SgxFileUtils::remove(filePathPrivateKey);
+        }
+
+        return static_cast<SgxStatus>(status);
+    }
+
+    //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::getEcParams(const uint32_t& keyId,
+                                            uint8_t*        destBuffer,
+                                            const uint32_t& destBufferLen,
+                                            uint32_t*       destBufferWritten)
+    {
+        SgxCryptStatus status = SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL;
+
+        do
+        {
+            if (!destBufferWritten)
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_PARAMETER;
+                break;
+            }
+
+            AsymmetricKey asymKey;
+            if (!getAsymmetricKey(keyId, &asymKey, OperationType::Any))
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE;
+                break;
+            }
+
+            if (asymKey.ecKey)
+            {
+                const EC_GROUP* ecGroup = EC_KEY_get0_group(asymKey.ecKey);
+                if (!ecGroup)
+                {
+                    break;
+                }
+
+                *destBufferWritten = i2d_ECPKParameters(ecGroup, nullptr);
+
+                if (!destBuffer)
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+                    break;
+                }
+
+                if (destBufferLen < *destBufferWritten)
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_BUFFER_TOO_SHORT;
+                    break;
+                }
+
+                unsigned char *derPtr = destBuffer;
+                if (!i2d_ECPKParameters(ecGroup, &derPtr))
+                {
+                    *destBufferWritten = 0;
+                    break;
+                }
+            }
+            else if (asymKey.edKey)
+            {
+                int nid = EVP_PKEY_id(asymKey.edKey);
+
+                *destBufferWritten = i2d_ASN1_OBJECT(OBJ_nid2obj(nid), nullptr);
+
+                if (!destBuffer)
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+                    break;
+                }
+
+                if (destBufferLen < *destBufferWritten)
+                {
+                    status = SgxCryptStatus::SGX_CRYPT_STATUS_BUFFER_TOO_SHORT;
+                    break;
+                }
+
+                unsigned char *derPtr = destBuffer;
+                if (!i2d_ASN1_OBJECT(OBJ_nid2obj(nid), &derPtr))
+                {
+                    *destBufferWritten = 0;
+                    break;
+                }
+            }
+            else
+            {
+                status = SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE;
+                break;
+            }
+
+            status = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
+        } while (false);
+
+        return static_cast<SgxStatus>(status);
+    }
+
+    //---------------------------------------------------------------------------------------------
+    SgxStatus AsymmetricCrypto::setWrappingStatus(const uint32_t& keyId)
+    {
+        if (!mAsymmetricPublicKeyCache.find(keyId))
+        {
+            return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_KEY_HANDLE);
+        }
+
+        AsymmetricKey asymmetricKeyPub = mAsymmetricPublicKeyCache.get(keyId);
+
+        if (asymmetricKeyPub.isUsedForWrapping)
+        {
+            return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
+        }
+
+        if (!asymmetricKeyPub.keyFile.empty())
+        {
+            if (!Utils::TokenObjectParser::setWrappingStatus(asymmetricKeyPub.keyFile, asymmetricKeyPub.pairKeyId))
+            {
+                return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL);
+            }
+        }
+
+        asymmetricKeyPub.isUsedForWrapping = true;
+
+        mAsymmetricPublicKeyCache.add(keyId, asymmetricKeyPub);
+
+        if (asymmetricKeyPub.pairKeyId)
+        {
+            uint32_t privateKeyId = mAsymmetricPrivateKeyCache.findKeyIdForPairKeyId(asymmetricKeyPub.pairKeyId);
+
+            AsymmetricKey asymmetricKeyPriv = mAsymmetricPrivateKeyCache.get(privateKeyId);
+
+            if (asymmetricKeyPriv.isUsedForWrapping)
+            {
+                return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
+            }
+
+            if (!asymmetricKeyPriv.keyFile.empty())
+            {
+                if (!Utils::TokenObjectParser::setWrappingStatus(asymmetricKeyPriv.keyFile, asymmetricKeyPriv.pairKeyId))
+                {
+                    return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_UNSUCCESSFUL);
+                }
+            }
+
+            asymmetricKeyPriv.isUsedForWrapping = true;
+
+            mAsymmetricPrivateKeyCache.add(privateKeyId, asymmetricKeyPriv);
+        }
+
+        return static_cast<SgxStatus>(SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS);
+    }
+
+    //---------------------------------------------------------------------------------------------
+    bool AsymmetricCrypto::checkWrappingStatus(const uint32_t& keyId, const OperationType& type)
+    {
+        AsymmetricKey asymmetricKey {};
+        if (OperationType::Public == type)
+        {
+            asymmetricKey = mAsymmetricPublicKeyCache.get(keyId);
+        }
+        else if (OperationType::Private == type)
+        {
+            asymmetricKey = mAsymmetricPrivateKeyCache.get(keyId);
+        }
+        else
+        {
+            return false;
+        }
+
+        return asymmetricKey.isUsedForWrapping;
+    }
+
 } //CryptoSgx

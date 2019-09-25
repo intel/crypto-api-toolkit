@@ -101,13 +101,13 @@ static CK_RV aesEncryptInit(const CK_SESSION_HANDLE& hSession,
 }
 
 //---------------------------------------------------------------------------------------------
-static CK_RV rsaEncryptInit(const CK_SESSION_HANDLE& hSession, const CK_OBJECT_HANDLE& hKey)
+static CK_RV rsaEncryptInit(const CK_SESSION_HANDLE& hSession, const CK_MECHANISM_PTR pMechanism, const CK_OBJECT_HANDLE& hKey)
 {
     CK_RV rv = CKR_FUNCTION_FAILED;
 
     do
     {
-        if (!isInitialized() || !gSessionCache)
+        if (!isInitialized() || !gSessionCache || !pMechanism)
         {
             rv = CKR_CRYPTOKI_NOT_INITIALIZED;
             break;
@@ -133,9 +133,26 @@ static CK_RV rsaEncryptInit(const CK_SESSION_HANDLE& hSession, const CK_OBJECT_H
             break;
         }
 
+        RsaPadding rsaPadding = RsaPadding::rsaNoPadding;
+
+        if (CKM_RSA_PKCS == pMechanism->mechanism)
+        {
+            rsaPadding = RsaPadding::rsaPkcs1;
+        }
+        else if (CKM_RSA_PKCS_OAEP == pMechanism->mechanism)
+        {
+            rsaPadding = RsaPadding::rsaPkcs1Oaep;
+        }
+        else
+        {
+            rv = CKR_MECHANISM_INVALID;
+            break;
+        }
+
         sessionParameters.activeOperation.reset(ActiveOp::Encrypt_None);
         sessionParameters.activeOperation.set(ActiveOp::RsaEncrypt_Init);
-        sessionParameters.data.encryptParams.keyHandle = hKey;
+        sessionParameters.data.encryptParams.keyHandle  = hKey;
+        sessionParameters.data.encryptParams.rsaPadding = rsaPadding;
 
         uint32_t sessionId = hSession & std::numeric_limits<uint32_t>::max();
         gSessionCache->add(sessionId, sessionParameters);
@@ -171,6 +188,12 @@ CK_RV encryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OB
             break;
         }
 
+        if (gSessionCache->checkWrappingStatus(hKey))
+        {
+            rv = CKR_OPERATION_NOT_PERMITTED;
+            break;
+        }
+
         if (Utils::AttributeUtils::isSymmetricMechanism(pMechanism))
         {
             rv = aesEncryptInit(hSession, pMechanism, hKey);
@@ -181,7 +204,7 @@ CK_RV encryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OB
         }
         else if (Utils::AttributeUtils::isAsymmetricMechanism(pMechanism))
         {
-            rv = rsaEncryptInit(hSession, hKey);
+            rv = rsaEncryptInit(hSession, pMechanism, hKey);
             if (CKR_OK != rv)
             {
                 break;
@@ -224,6 +247,12 @@ static CK_RV aesEncryptUpdate(const CK_SESSION_HANDLE& hSession,
         uint32_t keyHandle     = sessionParameters->data.encryptParams.keyHandle;
         uint32_t remainingSize = sessionParameters->data.encryptParams.currentBufferSize;
         CK_ULONG maxSize       = ulDataLen + remainingSize;
+
+        if (gSessionCache->checkWrappingStatus(keyHandle))
+        {
+            rv = CKR_OPERATION_NOT_PERMITTED;
+            break;
+        }
 
         if (!gSessionCache->checkKeyType(keyHandle, CKK_AES) ||
             !gSessionCache->attributeSet(keyHandle, BoolAttribute::ENCRYPT))
@@ -377,6 +406,13 @@ static CK_RV aesEncrypt(const CK_SESSION_HANDLE& hSession,
         }
 
         uint32_t keyHandle = sessionParameters->data.encryptParams.keyHandle;
+
+        if (gSessionCache->checkWrappingStatus(keyHandle))
+        {
+            rv = CKR_OPERATION_NOT_PERMITTED;
+            break;
+        }
+
         if (!gSessionCache->checkKeyType(keyHandle, CKK_AES) ||
             !gSessionCache->attributeSet(keyHandle, BoolAttribute::ENCRYPT))
         {
@@ -486,6 +522,13 @@ static CK_RV rsaEncrypt(const CK_SESSION_HANDLE& hSession,
         }
 
         uint32_t keyHandle = sessionParameters->data.encryptParams.keyHandle;
+
+        if (gSessionCache->checkWrappingStatus(keyHandle))
+        {
+            rv = CKR_OPERATION_NOT_PERMITTED;
+            break;
+        }
+
         if (!gSessionCache->checkKeyType(keyHandle, CKK_RSA) ||
             !gSessionCache->attributeSet(keyHandle, BoolAttribute::ENCRYPT))
         {
@@ -493,12 +536,15 @@ static CK_RV rsaEncrypt(const CK_SESSION_HANDLE& hSession,
             break;
         }
 
-        uint32_t destBufferRequired = 0;
-        uint32_t destBufferLength   = *pulEncryptedDataLen;
+        uint32_t   destBufferRequired = 0;
+        uint32_t   destBufferLength   = *pulEncryptedDataLen;
+        RsaPadding rsaPadding         = sessionParameters->data.encryptParams.rsaPadding;
+
         rv = P11Crypto::AsymmetricProvider::encrypt(keyHandle,
                                                     pData, ulDataLen,
                                                     pEncryptedData, destBufferLength,
-                                                    &destBufferRequired);
+                                                    &destBufferRequired,
+                                                    rsaPadding);
         if (CKR_OK != rv)
         {
             break;

@@ -73,7 +73,8 @@ namespace Utils
 
             switch (pMechanism->mechanism)
             {
-            case CKM_RSA_PKCS: // with implicit OAEP padding
+            case CKM_RSA_PKCS:
+            case CKM_RSA_PKCS_OAEP:
                 result = true;
                 break;
             default:
@@ -129,6 +130,34 @@ namespace Utils
             return rv;
         }
 
+        //---------------------------------------------------------------------------------------------
+        CK_RV getEcKeyGenParameters(const StringAttributeSet& strAttributes,
+                                    AsymmetricKeyParams*      asymKeyParams)
+        {
+            if (!asymKeyParams)
+            {
+                return CKR_GENERAL_ERROR;
+            }
+
+            asymKeyParams->clear();
+
+            auto strAttrIter = std::find_if(strAttributes.cbegin(), strAttributes.cend(), [](const StringAttributeType& p)
+                                    {
+                                        return (CKA_EC_PARAMS == p.first);
+                                    });
+
+            if (strAttrIter == strAttributes.cend())
+            {
+                return CKR_GENERAL_ERROR;
+            }
+            else
+            {
+                asymKeyParams->curveOid = strAttrIter->second;
+                asymKeyParams->keyGenMechanism = KeyGenerationMechanism::ecGeneratePublicKey;
+            }
+
+            return CKR_OK;
+        }
         //---------------------------------------------------------------------------------------------
         CK_RV getRsaKeyGenParameters(const UlongAttributeSet&  ulongAttributes,
                                      const StringAttributeSet& strAttributes,
@@ -259,7 +288,6 @@ namespace Utils
                 case KeyGenerationMechanism::aesGCMUnwrapKey:
                 case KeyGenerationMechanism::aesCBCUnwrapKey:
                 case KeyGenerationMechanism::aesCBCPADUnwrapKey:
-                case KeyGenerationMechanism::aesImportPbindKey:
                     result = (CKO_SECRET_KEY == attrValStruct.objectClass &&
                               CKK_AES        == attrValStruct.keyType     &&
                               !keyBuffer                                  &&
@@ -275,6 +303,81 @@ namespace Utils
                               !keyLength                                  &&
                               !modulusBits                                &&
                               !localAttr);
+                    break;
+                default:
+                    result = false;
+                    break;
+            }
+
+            return result;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        bool validateEcKeyGenAttributes(const KeyGenerationMechanism&   keyGenMechanism,
+                                        const AttributeValidatorStruct& attrValStruct,
+                                        const BoolAttributeSet&         boolAttributes)
+        {
+            bool  result = false;
+
+            bool modulusBits = attrValStruct.boolAttrVal[AttrValidatorBoolParams::ModulusBits];
+            bool keyLength   = attrValStruct.boolAttrVal[AttrValidatorBoolParams::KeyLength];
+            bool keyBuffer   = attrValStruct.boolAttrVal[AttrValidatorBoolParams::RawKeyBuffer];
+            bool ecParams    = attrValStruct.boolAttrVal[AttrValidatorBoolParams::EcParams];
+
+            switch(keyGenMechanism)
+            {
+                case KeyGenerationMechanism::ecGeneratePublicKey:
+                    result = (CKO_PUBLIC_KEY == attrValStruct.objectClass  &&
+                              CKK_EC         == attrValStruct.keyType      &&
+                              ecParams                                     &&
+                              !modulusBits                                 &&
+                              !keyBuffer                                   &&
+                              !keyLength                                   &&
+                              !boolAttributes.test(BoolAttribute::ENCRYPT) &&
+                              !boolAttributes.test(BoolAttribute::DECRYPT) &&
+                              !boolAttributes.test(BoolAttribute::WRAP)    &&
+                              !boolAttributes.test(BoolAttribute::UNWRAP)  &&
+                              !boolAttributes.test(BoolAttribute::SIGN));
+                    break;
+
+                case KeyGenerationMechanism::ecGeneratePrivateKey:
+                    result = (CKO_PRIVATE_KEY == attrValStruct.objectClass &&
+                              CKK_EC          == attrValStruct.keyType     &&
+                              !ecParams                                    &&
+                              !modulusBits                                 &&
+                              !keyBuffer                                   &&
+                              !keyLength                                   &&
+                              !boolAttributes.test(BoolAttribute::ENCRYPT) &&
+                              !boolAttributes.test(BoolAttribute::DECRYPT) &&
+                              !boolAttributes.test(BoolAttribute::WRAP)    &&
+                              !boolAttributes.test(BoolAttribute::UNWRAP)  &&
+                              !boolAttributes.test(BoolAttribute::VERIFY));
+                    break;
+                case KeyGenerationMechanism::edGeneratePublicKey:
+                    result = (CKO_PUBLIC_KEY == attrValStruct.objectClass  &&
+                              CKK_EC_EDWARDS == attrValStruct.keyType      &&
+                              ecParams                                     &&
+                              !modulusBits                                 &&
+                              !keyBuffer                                   &&
+                              !keyLength                                   &&
+                              !boolAttributes.test(BoolAttribute::ENCRYPT) &&
+                              !boolAttributes.test(BoolAttribute::DECRYPT) &&
+                              !boolAttributes.test(BoolAttribute::WRAP)    &&
+                              !boolAttributes.test(BoolAttribute::UNWRAP)  &&
+                              !boolAttributes.test(BoolAttribute::SIGN));
+                    break;
+                case KeyGenerationMechanism::edGeneratePrivateKey:
+                    result = (CKO_PRIVATE_KEY == attrValStruct.objectClass &&
+                              CKK_EC_EDWARDS  == attrValStruct.keyType     &&
+                              !ecParams                                    &&
+                              !modulusBits                                 &&
+                              !keyBuffer                                   &&
+                              !keyLength                                   &&
+                              !boolAttributes.test(BoolAttribute::ENCRYPT) &&
+                              !boolAttributes.test(BoolAttribute::DECRYPT) &&
+                              !boolAttributes.test(BoolAttribute::WRAP)    &&
+                              !boolAttributes.test(BoolAttribute::UNWRAP)  &&
+                              !boolAttributes.test(BoolAttribute::VERIFY));
                     break;
                 default:
                     result = false;
@@ -314,21 +417,11 @@ namespace Utils
                     break;
 
                 case KeyGenerationMechanism::rsaImportPublicKey:
-                case KeyGenerationMechanism::rsaImportPbindPublicKey:
                     result = (CKO_PUBLIC_KEY == attrValStruct.objectClass &&
                               CKK_RSA        == attrValStruct.keyType     &&
                               !modulusBits                                &&
                               !keyBuffer                                  &&
                               !keyLength                                  &&
-                              !localAttr);
-                    break;
-
-                case KeyGenerationMechanism::rsaImportPbindPrivateKey:
-                    result = (CKO_PRIVATE_KEY == attrValStruct.objectClass &&
-                              CKK_RSA         == attrValStruct.keyType     &&
-                              !modulusBits                                 &&
-                              !keyBuffer                                   &&
-                              !keyLength                                   &&
                               !localAttr);
                     break;
                 default:
@@ -350,6 +443,10 @@ namespace Utils
                     case KeyGenerationMechanism::aesGenerateKey:
                     case KeyGenerationMechanism::rsaGeneratePublicKey:
                     case KeyGenerationMechanism::rsaGeneratePrivateKey:
+                    case KeyGenerationMechanism::ecGeneratePublicKey:
+                    case KeyGenerationMechanism::ecGeneratePrivateKey:
+                    case KeyGenerationMechanism::edGeneratePublicKey:
+                    case KeyGenerationMechanism::edGeneratePrivateKey:
                         boolAttributes->set(p11AttributeToBoolAttribute[CKA_LOCAL]);
                         break;
                     default:
@@ -536,7 +633,7 @@ namespace Utils
         {
             CK_RV rv = CKR_OK;
 
-            std::string id, label, rawKeyBuffer;
+            std::string id, label, rawKeyBuffer, oid;
 
             if (!idPresent || !attrValStruct || !strAttributes)
             {
@@ -570,6 +667,18 @@ namespace Utils
                     rawKeyBuffer.assign(reinterpret_cast<const char*>(attributeValue), attributeLen);
                     strAttributes->insert(StringAttributeType(attributeType, rawKeyBuffer));
                     attrValStruct->boolAttrVal.set(AttrValidatorBoolParams::RawKeyBuffer);
+                    break;
+
+                case CKA_EC_PARAMS:
+                    if (attributeLen > maxEcParamsLen)
+                    {
+                        rv = CKR_ATTRIBUTE_VALUE_INVALID;
+                        break;
+                    }
+
+                    oid.assign(reinterpret_cast<const char*>(attributeValue), attributeLen);
+                    strAttributes->insert(StringAttributeType(attributeType, oid));
+                    attrValStruct->boolAttrVal.set(AttrValidatorBoolParams::EcParams);
                     break;
 
                 default:
@@ -890,25 +999,6 @@ namespace Utils
         }
 
         //---------------------------------------------------------------------------------------------
-        std::vector<uint8_t> getRsaSealedKeyFromMechanism(const CK_MECHANISM_PTR pMechanism)
-        {
-            std::vector<uint8_t> platformBoundKey;
-
-            if (pMechanism &&
-                pMechanism->pParameter &&
-                pMechanism->ulParameterLen == sizeof(CK_RSA_PBIND_IMPORT_PARAMS))
-            {
-                platformBoundKey.resize(CK_RSA_PBIND_IMPORT_PARAMS_PTR(pMechanism->pParameter)->ulPlatformBoundKeyLen);
-
-                memcpy(&platformBoundKey[0],
-                       CK_RSA_PBIND_IMPORT_PARAMS_PTR(pMechanism->pParameter)->pPlatformBoundKey,
-                       CK_RSA_PBIND_IMPORT_PARAMS_PTR(pMechanism->pParameter)->ulPlatformBoundKeyLen);
-            }
-
-            return platformBoundKey;
-        }
-
-        //---------------------------------------------------------------------------------------------
         CK_RV getAesParameters(const CK_MECHANISM_PTR pMechanism, AesCryptParams* aesCryptParams)
         {
             CK_RV rv       = CKR_OK;
@@ -1152,7 +1242,7 @@ namespace Utils
             bool              attributeInvalid   = false;
             bool              attributeSensitive = false;
             bool              bufferTooSmall     = false;
-            bool              attributeValueNull = false;
+            bool              sizeRequest        = false;
             CK_BBOOL          attributeValue     = CK_FALSE;
             CK_ATTRIBUTE_TYPE attributeType;
 
@@ -1175,11 +1265,11 @@ namespace Utils
                         continue;
                     }
 
-                    attributeValueNull = !pTemplate[i].pValue;    // Check if this is a size request with pValue as nullptr.
+                    sizeRequest = !pTemplate[i].pValue;    // Check if this is a size request with pValue as nullptr.
 
                     if (isBoolAttribute(attributeType))
                     {
-                        if (attributeValueNull)
+                        if (sizeRequest)
                         {
                             pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
                             continue;
@@ -1226,7 +1316,7 @@ namespace Utils
                             CK_ULONG attributeValue = attributeAttrIt->second;
                             CK_ULONG attributeSize  = sizeof(CK_ULONG);
 
-                            if (attributeValueNull)
+                            if (sizeRequest)
                             {
                                 pTemplate[i].ulValueLen = attributeSize;
                                 continue;
@@ -1259,7 +1349,7 @@ namespace Utils
                             {
                                 rv = Utils::EnclaveUtils::getRsaModulusExponent(keyHandle,
                                                                                 attributeType,
-                                                                                attributeValueNull,
+                                                                                sizeRequest,
                                                                                 &attributeValue,
                                                                                 &attributeSize);
                                 if (CKR_OK != rv)
@@ -1267,6 +1357,14 @@ namespace Utils
                                     attributeInvalid = true;
                                     continue;
                                 }
+                            }
+                            else if (CKA_EC_PARAMS == attributeType)
+                            {
+                                rv = Utils::EnclaveUtils::getEcParams(keyHandle,
+                                                                      attributeType,
+                                                                      sizeRequest,
+                                                                      &attributeValue,
+                                                                      &attributeSize);
                             }
                             else
                             {
@@ -1282,7 +1380,7 @@ namespace Utils
                                 attributeSize  = attributeValue.size();
                             }
 
-                            if (attributeValueNull)
+                            if (sizeRequest)
                             {
                                 pTemplate[i].ulValueLen = attributeSize;
                                 continue;
@@ -1379,6 +1477,15 @@ namespace Utils
                             break;
                         }
 
+                        if ((CKA_PRIVATE == attributeType &&      // Can't change CKA_PRIVATE attribute.
+                            (objectParams->boolAttributes[BoolAttribute::PRIVATE] != boolValue)) ||
+                            (CKA_TOKEN == attributeType &&        // Can't change CKA_TOKEN attribute.
+                            (objectParams->boolAttributes[BoolAttribute::TOKEN] != boolValue)))
+                        {
+                            rv = CKR_TEMPLATE_INCONSISTENT;
+                            break;
+                        }
+
                         if (boolValue)
                         {
                             // CKA_DERIVE and CKA_COPYABLE can't be set to CK_TRUE.
@@ -1404,7 +1511,8 @@ namespace Utils
                     {
                         if (CKA_VALUE_KEY_BUFFER == attributeType ||
                             CKA_MODULUS          == attributeType ||
-                            CKA_PUBLIC_EXPONENT  == attributeType)
+                            CKA_PUBLIC_EXPONENT  == attributeType ||
+                            CKA_EC_PARAMS        == attributeType)
                         {
                             rv = CKR_ATTRIBUTE_READ_ONLY;
                             break;
@@ -1456,6 +1564,182 @@ namespace Utils
             }
 
             return rv;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        bool packAttributes(const CK_SLOT_ID&         slotId,
+                            const UlongAttributeSet&  ulongAttributes,
+                            const StringAttributeSet& strAttributes,
+                            const BoolAttributeSet&   boolAttributes,
+                            std::vector<CK_ULONG>*    packedAttributes)
+        {
+            if (!packedAttributes)
+            {
+                return false;
+            }
+
+            // Pack slot id
+            packedAttributes->push_back(static_cast<CK_ULONG>(slotId));
+
+            // Pack key type
+            auto keyClassAttrIt = getUlongAttrIterator(ulongAttributes, CKA_CLASS);
+            if (ulongAttributes.end() == keyClassAttrIt)
+            {
+                return false;
+            }
+
+            auto keyTypeAttrIt = getUlongAttrIterator(ulongAttributes, CKA_KEY_TYPE);
+            if (ulongAttributes.end() == keyTypeAttrIt)
+            {
+                return false;
+            }
+
+            KeyClassType keyClass = KeyClassType::Invalid;
+            if (keyClassAttrIt->second == CKO_SECRET_KEY)
+            {
+                keyClass = KeyClassType::Aes;
+            }
+            else if (keyClassAttrIt->second == CKO_PUBLIC_KEY)
+            {
+                if (keyTypeAttrIt->second == CKK_RSA)
+                {
+                    keyClass = KeyClassType::RsaPublicKey;
+                }
+                else if (keyTypeAttrIt->second == CKK_EC)
+                {
+                    keyClass = KeyClassType::EcPublicKey;
+                }
+                else if (keyTypeAttrIt->second == CKK_EC_EDWARDS)
+                {
+                    keyClass = KeyClassType::EdPublicKey;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            else if (keyClassAttrIt->second == CKO_PRIVATE_KEY)
+            {
+                if (keyTypeAttrIt->second == CKK_RSA)
+                {
+                    keyClass = KeyClassType::RsaPrivateKey;
+                }
+                else if (keyTypeAttrIt->second == CKK_EC)
+                {
+                    keyClass = KeyClassType::EcPrivateKey;
+                }
+                else if (keyTypeAttrIt->second == CKK_EC_EDWARDS)
+                {
+                    keyClass = KeyClassType::EdPrivateKey;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                return false;
+            }
+
+            packedAttributes->push_back(static_cast<CK_ULONG>(keyClass));
+
+            // Pack bool attributes
+            packedAttributes->push_back(static_cast<CK_ULONG>(boolAttributes.to_ulong()));
+
+            // Pack ulong attributes
+            packedAttributes->push_back(static_cast<CK_ULONG>(ulongAttributes.size()));
+
+            std::for_each(ulongAttributes.begin(), ulongAttributes.end(), [packedAttributes](const UlongAttributeType& ulongPair)
+                                                                            {
+                                                                                packedAttributes->push_back(ulongPair.first);
+                                                                                packedAttributes->push_back(ulongPair.second);
+                                                                            });
+
+            // Pack string attributes
+            CK_ULONG strAttributeCount = strAttributes.size();
+            packedAttributes->push_back(strAttributeCount);
+
+            std::for_each(strAttributes.begin(), strAttributes.end(), [packedAttributes](const StringAttributeType& strPair)
+                                                                            {
+                                                                                packedAttributes->push_back(strPair.first);
+                                                                                packedAttributes->push_back(static_cast<CK_ULONG>(strPair.second.size()));
+                                                                                std::copy(strPair.second.begin(), strPair.second.end(), std::back_inserter(*packedAttributes));
+                                                                            });
+            return true;
+        }
+
+        //---------------------------------------------------------------------------------------------
+        bool unpackAttributes(std::vector<CK_ULONG>& packedAttributes,
+                              UlongAttributeSet*     ulongAttributes,
+                              StringAttributeSet*    strAttributes,
+                              BoolAttributeSet*      boolAttributes)
+        {
+            if (!ulongAttributes || !strAttributes || !boolAttributes)
+            {
+                return false;
+            }
+
+            CK_ULONG ulongSize = sizeof(CK_ULONG);
+            CK_ULONG offset    = 0;
+
+            auto getUlongValue = [&offset, &ulongSize, &packedAttributes](CK_ULONG& value)
+                                 {
+                                     memcpy(&value, packedAttributes.data() + offset, ulongSize);
+                                     offset += 1;
+                                 };
+
+            // Unpack slotID
+            CK_SLOT_ID slotId = maxSlotsSupported + 1;
+            getUlongValue(slotId);
+
+            // Unpack key type
+            CK_ULONG keyClassUlong = 0;
+            getUlongValue(keyClassUlong);
+
+            // Unpack bool attributes
+            CK_ULONG boolAttributesUlong = 0;
+            getUlongValue(boolAttributesUlong);
+
+            *boolAttributes = std::bitset<MAX_BOOL_ATTRIBUTES>(boolAttributesUlong);
+
+            // Unpack ulong attributes
+            CK_ULONG ulongAttributeCount = 0;
+            getUlongValue(ulongAttributeCount);
+
+            CK_ULONG attributeType  = 0;
+            CK_ULONG attributeValue = 0;
+
+            for (auto i = 0; i < ulongAttributeCount; i++)
+            {
+                getUlongValue(attributeType);
+                getUlongValue(attributeValue);
+
+                ulongAttributes->insert(UlongAttributeType(attributeType, attributeValue));
+            }
+
+            // Unpack string attributes
+            CK_ULONG strAttributeCount = 0;
+            getUlongValue(strAttributeCount);
+
+            CK_ULONG attributeSize = 0;
+            std::string strAttributeValue;
+            for (auto i = 0; i < strAttributeCount; i++)
+            {
+                getUlongValue(attributeType);
+                getUlongValue(attributeSize);
+
+                for (auto j = 0; j < attributeSize; j++)
+                {
+                    getUlongValue(attributeValue);
+                    strAttributeValue += static_cast<char>(attributeValue);
+                }
+
+                strAttributes->insert(StringAttributeType(attributeType, strAttributeValue));
+                strAttributeValue.clear();
+            }
+
+            return true;
         }
     }
 }

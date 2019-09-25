@@ -56,9 +56,32 @@ namespace Utils
 
         CK_RV getRsaModulusExponent(const CK_OBJECT_HANDLE&  keyHandle,
                                     const CK_ATTRIBUTE_TYPE& attributeType,
-                                    const bool&              attributeValueNull,
+                                    const bool&              sizeRequest,
                                     std::string*             attributeValue,
                                     uint32_t*                attributeSize);
+
+        CK_RV getEcParams(const CK_OBJECT_HANDLE&  keyHandle,
+                          const CK_ATTRIBUTE_TYPE& attributeType,
+                          const bool&              sizeRequest,
+                          std::string*             attributeValue,
+                          uint32_t*                attributeSize);
+
+        CK_RV readTokenObject(const std::string& tokenObjectFilePath,
+                              const CK_SLOT_ID&  slotID,
+                              uint64_t*          attributeBuffer,
+                              uint32_t           attributeBufferLen,
+                              uint64_t*          attributeBufferLenRequired,
+                              uint32_t*          keyHandle);
+
+        CK_RV updateTokenObject(const uint32_t&              keyHandle,
+                                const CK_KEY_TYPE&           keyType,
+                                const std::vector<CK_ULONG>& packedAttributes);
+
+        CK_RV updateSOPinMaterialInFile(const CK_SLOT_ID& slotID, const std::string& tokenObjectFilePath);
+
+        CK_RV saveSoPinMaterial(const CK_SLOT_ID&  slotId, const std::string& sealedPin);
+
+        CK_RV updateObjectHandle(const uint32_t& keyHandle, const uint32_t& newKeyHandle, const KeyType& keyType);
     }
 }
 

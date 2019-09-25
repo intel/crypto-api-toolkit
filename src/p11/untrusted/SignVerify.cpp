@@ -49,12 +49,54 @@ static bool isSupportedSignVerifyMechanism(const CK_MECHANISM_PTR pMechanism)
     case CKM_SHA512_RSA_PKCS:
     case CKM_SHA256_RSA_PKCS_PSS:
     case CKM_SHA512_RSA_PKCS_PSS:
+    case CKM_ECDSA:
+    case CKM_EDDSA:
         result = true;
         break;
     default:
         result = false;
         break;
     }
+    return result;
+}
+
+//---------------------------------------------------------------------------------------------
+static bool validateMechanismWithKeyType(const CK_MECHANISM_TYPE& mechanismType, const CK_KEY_TYPE& keyType)
+{
+    bool result = false;
+
+    switch (mechanismType)
+    {
+        case CKM_RSA_PKCS:
+        case CKM_RSA_PKCS_PSS:
+        case CKM_SHA256_RSA_PKCS:
+        case CKM_SHA512_RSA_PKCS:
+        case CKM_SHA256_RSA_PKCS_PSS:
+        case CKM_SHA512_RSA_PKCS_PSS:
+            if (CKK_RSA != keyType)
+            {
+                break;
+            }
+            result = true;
+            break;
+        case CKM_ECDSA:
+            if (CKK_EC != keyType)
+            {
+                break;
+            }
+            result = true;
+            break;
+        case CKM_EDDSA:
+            if (CKK_EC_EDWARDS != keyType)
+            {
+                break;
+            }
+            result = true;
+            break;
+        default:
+            break;
+    }
+
     return result;
 }
 
@@ -66,6 +108,7 @@ CK_RV signInit(CK_SESSION_HANDLE hSession,
     CK_RV      rv         = CKR_FUNCTION_FAILED;
     RsaPadding rsaPadding = RsaPadding::rsaNoPadding;
     HashMode   hashMode   = HashMode::invalid;
+    bool       rsaSign    = true;
 
     do
     {
@@ -101,6 +144,19 @@ CK_RV signInit(CK_SESSION_HANDLE hSession,
 
         if (isSupportedSignVerifyMechanism(pMechanism))
         {
+            CK_KEY_TYPE keyType = gSessionCache->getKeyType(hKey);
+            if (CKK_VENDOR_DEFINED == keyType)
+            {
+                rv = CKR_KEY_HANDLE_INVALID;
+                break;
+            }
+
+            if (!validateMechanismWithKeyType(pMechanism->mechanism, keyType))
+            {
+                rv = CKR_ARGUMENTS_BAD;
+                break;
+            }
+
             SessionParameters sessionParameters = gSessionCache->getSessionParameters(hSession);
             if (!sessionParameters.activeOperation.test(ActiveOp::Sign_None))
             {
@@ -110,6 +166,12 @@ CK_RV signInit(CK_SESSION_HANDLE hSession,
 
             switch(pMechanism->mechanism)
             {
+                case CKM_ECDSA:
+                    rsaSign = false;
+                    break;
+                case CKM_EDDSA:
+                    rsaSign = false;
+                    break;
                 case CKM_RSA_PKCS:
                     rsaPadding = RsaPadding::rsaPkcs1;
                     break;
@@ -154,9 +216,13 @@ CK_RV signInit(CK_SESSION_HANDLE hSession,
 
             sessionParameters.activeOperation.reset(ActiveOp::Sign_None);
             sessionParameters.activeOperation.set(ActiveOp::Sign_Init);
-            sessionParameters.data.signParams.keyHandle  = hKey;
-            sessionParameters.data.signParams.hashMode   = hashMode;
-            sessionParameters.data.signParams.rsaPadding = rsaPadding;
+            sessionParameters.data.signParams.keyHandle = hKey;
+
+            if(rsaSign)
+            {
+                sessionParameters.data.signParams.hashMode   = hashMode;
+                sessionParameters.data.signParams.rsaPadding = rsaPadding;
+            }
 
             uint32_t sessionId = hSession & std::numeric_limits<uint32_t>::max();
             gSessionCache->add(sessionId, sessionParameters);
@@ -262,6 +328,7 @@ CK_RV verifyInit(CK_SESSION_HANDLE hSession,
     CK_RV      rv         = CKR_FUNCTION_FAILED;
     RsaPadding rsaPadding = RsaPadding::rsaNoPadding;
     HashMode   hashMode   = HashMode::invalid;
+    bool       rsaVerify  = true;
 
     do
     {
@@ -297,6 +364,19 @@ CK_RV verifyInit(CK_SESSION_HANDLE hSession,
 
         if (isSupportedSignVerifyMechanism(pMechanism))
         {
+            CK_KEY_TYPE keyType = gSessionCache->getKeyType(hKey);
+            if (CKK_VENDOR_DEFINED == keyType)
+            {
+                rv = CKR_KEY_HANDLE_INVALID;
+                break;
+            }
+
+            if (!validateMechanismWithKeyType(pMechanism->mechanism, keyType))
+            {
+                rv = CKR_ARGUMENTS_BAD;
+                break;
+            }
+
             SessionParameters sessionParameters = gSessionCache->getSessionParameters(hSession);
             if (!sessionParameters.activeOperation.test(ActiveOp::Verify_None))
             {
@@ -306,6 +386,20 @@ CK_RV verifyInit(CK_SESSION_HANDLE hSession,
 
             switch(pMechanism->mechanism)
             {
+                case CKM_ECDSA:
+#ifdef EC_VERIFY
+                    rsaVerify = false;
+#else
+                    rv = CKR_MECHANISM_INVALID;
+#endif
+                    break;
+                case CKM_EDDSA:
+#ifdef ED_VERIFY
+                    rsaVerify = false;
+#else
+                    rv = CKR_MECHANISM_INVALID;
+#endif
+                    break;
                 case CKM_RSA_PKCS:
                     rsaPadding = RsaPadding::rsaPkcs1;
                     break;
@@ -351,8 +445,12 @@ CK_RV verifyInit(CK_SESSION_HANDLE hSession,
             sessionParameters.activeOperation.reset(ActiveOp::Verify_None);
             sessionParameters.activeOperation.set(ActiveOp::Verify_Init);
             sessionParameters.data.verifyParams.keyHandle  = hKey;
-            sessionParameters.data.verifyParams.hashMode   = hashMode;
-            sessionParameters.data.verifyParams.rsaPadding = rsaPadding;
+
+            if (rsaVerify)
+            {
+                sessionParameters.data.verifyParams.hashMode   = hashMode;
+                sessionParameters.data.verifyParams.rsaPadding = rsaPadding;
+            }
 
             uint32_t sessionId = hSession & std::numeric_limits<uint32_t>::max();
             gSessionCache->add(sessionId, sessionParameters);

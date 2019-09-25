@@ -121,6 +121,8 @@ namespace P11Crypto
 
         CK_RV login(const CK_UTF8CHAR_PTR pin, const CK_ULONG& pinLength, const CK_USER_TYPE& userType);
 
+        std::string getSOPinMaterial();
+
     private:
 
         void loadTokenData();

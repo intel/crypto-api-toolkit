@@ -115,6 +115,14 @@ CK_RV destroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hKey)
         {
             keyType = KeyType::Rsa;
         }
+        else if (gSessionCache->checkKeyType(hKey, CKK_EC))
+        {
+            keyType = KeyType::Ec;
+        }
+        else if (gSessionCache->checkKeyType(hKey, CKK_EC_EDWARDS))
+        {
+            keyType = KeyType::Ed;
+        }
         else
         {
             rv = CKR_KEY_HANDLE_INVALID;
@@ -260,6 +268,40 @@ CK_RV getAttributeValue(CK_SESSION_HANDLE hSession,
 }
 
 //---------------------------------------------------------------------------------------------
+static CK_RV updateTokenObjectFile(const CK_SLOT_ID&       slotId,
+                                   const CK_OBJECT_HANDLE& keyHandle,
+                                   const ObjectParameters& objectParams)
+{
+    CK_RV rv = CKR_FUNCTION_FAILED;
+
+    do
+    {
+        std::vector<CK_ULONG> packedAttributes;
+
+        if (!Utils::AttributeUtils::packAttributes(slotId,
+                                                   objectParams.ulongAttributes,
+                                                   objectParams.strAttributes,
+                                                   objectParams.boolAttributes,
+                                                   &packedAttributes))
+        {
+            rv = CKR_GENERAL_ERROR;
+            break;
+        }
+
+        CK_KEY_TYPE keyType = gSessionCache->getKeyType(keyHandle);
+
+        rv = Utils::EnclaveUtils::updateTokenObject(keyHandle, keyType, packedAttributes);
+        if (CKR_OK != rv)
+        {
+            break;
+        }
+
+    } while(false);
+
+    return rv;
+}
+
+//---------------------------------------------------------------------------------------------
 CK_RV setAttributeValue(CK_SESSION_HANDLE hSession,
                         CK_OBJECT_HANDLE  hObject,
                         CK_ATTRIBUTE_PTR  pTemplate,
@@ -334,6 +376,15 @@ CK_RV setAttributeValue(CK_SESSION_HANDLE hSession,
         {
             rv = CKR_TEMPLATE_INCONSISTENT;
             break;
+        }
+
+        if (objectParams.boolAttributes.test(BoolAttribute::TOKEN))
+        {
+            rv = updateTokenObjectFile(slotID, hObject, objectParams);
+            if (CKR_OK != rv)
+            {
+                break;
+            }
         }
 
         gSessionCache->addObject(hSession, hObject, objectParams);

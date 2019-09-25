@@ -29,7 +29,7 @@
 #
 #
 
-AC_INIT([cryptoapitoolkit], [1.4])
+AC_INIT([cryptoapitoolkit], [1.5])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE([foreign -Wall])
@@ -86,6 +86,22 @@ AS_IF([test "x$DCAP_PATH" != "xNO_PATH_SET_UNSUPPORTED"],
 
 AS_IF([test "x$IMPORT_RAW_SYMKEY_FOR_HMAC_SUPPORT" = "xyes"],
       [AC_DEFINE([IMPORT_KEY_FOR_HMAC], [], [Support for importing raw symmetric key for HMAC])])
+
+AC_ARG_ENABLE([verify-with-ec-support],
+              AC_HELP_STRING([--enable-verify-with-ec-support], [Enable signature verification with EC key. Use with caution/only for test purposes.]),
+              [EC_VERIFY_SUPPORT="${enableval}"],
+              [echo "--verify-with-ec-support option not set. Defaults to no support for verifying signature with EC key"; EC_VERIFY_SUPPORT="no"])
+
+AS_IF([test "x$EC_VERIFY_SUPPORT" = "xyes"],
+      [AC_DEFINE([EC_VERIFY], [], [Support for signature verification using EC keys])])
+
+AC_ARG_ENABLE([verify-with-ed-support],
+              AC_HELP_STRING([--enable-verify-with-ed-support], [Enable signature verification with ED key. Use with caution/only for test purposes.]),
+              [ED_VERIFY_SUPPORT="${enableval}"],
+              [echo "--verify-with-ed-support option not set. Defaults to no support for verifying signature with ED key"; ED_VERIFY_SUPPORT="no"])
+
+AS_IF([test "x$ED_VERIFY_SUPPORT" = "xyes"],
+      [AC_DEFINE([ED_VERIFY], [], [Support for signature verification using ED keys])])
 
 AC_SUBST(SGXSDKDIR, $SGXSDK)
 AC_SUBST(SGXSSLDIR, $SGXSSL)

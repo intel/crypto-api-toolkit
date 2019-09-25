@@ -51,6 +51,8 @@ The build can be configured using the following additional options.
 | --with-dcap-path=/path-to-dcap-include-path/ | The DCAP include directory. If this option is not provided while configuring, features depending on DCAP are not supported. |
 | --enable-import-raw-symkey-support= "yes" | Setting this option to ‘yes’ allows importing a data buffer (raw key import) into Crypto API Toolkit. |
 | --enable-import-raw-symkey-support-for-hmac="yes" | Setting this option to ‘yes’ allows the use of raw key imported as the secret buffer for HMAC operations. |
+| --enable-verify-with-ec-support="yes" | Setting this option to ‘yes’ allows signature verification by EC Keys. |
+| --enable-verify-with-ed-support="yes" | Setting this option to ‘yes’ allows signature verification by ED Keys. |
 
 
 After configuring, Crypto API Toolkit for Intel(R) SGX can be built with 

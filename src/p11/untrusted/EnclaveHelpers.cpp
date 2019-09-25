@@ -52,8 +52,7 @@ namespace P11Crypto
                                                                             { SgxCryptStatus::SGX_CRYPT_STATUS_INVALID_TAG_SIZE,          CKR_MECHANISM_PARAM_INVALID },
                                                                             { SgxCryptStatus::SGX_CRYPT_STATUS_KEY_TABLE_FULL,            CKR_DEVICE_TABLE_FULL },
                                                                             { SgxCryptStatus::SGX_CRYPT_STATUS_HASH_STATE_TABLE_FULL,     CKR_DEVICE_TABLE_FULL },
-                                                                            { SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED,   CKR_CIPHER_OPERATION_FAILED },
-                                                                            { SgxCryptStatus::SGX_CRYPT_STATUS_SEALED_DATA_FAILED,        CKR_PLATFORM_SEAL_UNSEAL_FAILED } });
+                                                                            { SgxCryptStatus::SGX_CRYPT_STATUS_CIPHER_OPERATION_FAILED,   CKR_CIPHER_OPERATION_FAILED } });
 
     //---------------------------------------------------------------------------------------------
     EnclaveHelpers::EnclaveHelpers()
@@ -87,7 +86,7 @@ namespace P11Crypto
                                        &token,
                                        &tokenUpdated,
                                        &sgxEnclaveId,
-                                       NULL);
+                                       nullptr);
 
 #if RELEASE_WHITELISTED_ENCLAVE
         if (sgx_status_t::SGX_ERROR_SERVICE_INVALID_PRIVILEGE == sgxStatus)

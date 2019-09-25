@@ -98,8 +98,8 @@ CK_RV generateKey(CK_SESSION_HANDLE    hSession,
             break;
         }
 
-        if (NULL_PTR != pMechanism->pParameter   ||
-            0        != pMechanism->ulParameterLen)
+        if (nullptr != pMechanism->pParameter ||
+            0       != pMechanism->ulParameterLen)
         {
             rv = CKR_MECHANISM_PARAM_INVALID;
             break;
@@ -143,6 +143,8 @@ CK_RV generateKey(CK_SESSION_HANDLE    hSession,
 
         Utils::AttributeUtils::addDefaultAttributes(keyGenMechanism, &boolAttributes);
 
+        ulongAttributes.insert(UlongAttributeType(CKA_KEY_GEN_MECHANISM, CKM_AES_KEY_GEN));
+
         bool importKey   = (keyGenMechanism == KeyGenerationMechanism::aesImportRawKey);
         bool generateKey = (keyGenMechanism == KeyGenerationMechanism::aesGenerateKey);
 
@@ -154,7 +156,30 @@ CK_RV generateKey(CK_SESSION_HANDLE    hSession,
             break;
         }
 
-        rv = P11Crypto::SymmetricProvider::generateAesKey(symKeyParams, importKey, phKey);
+        std::vector<CK_ULONG> packedAttributes;
+
+        CK_SLOT_ID slotId = gSessionCache->getSlotId(hSession);
+        if (slotId > maxSlotsSupported)
+        {
+            rv = CKR_GENERAL_ERROR;
+            break;
+        }
+
+        bool tokenObject = boolAttributes.test(Utils::AttributeUtils::p11AttributeToBoolAttribute[CKA_TOKEN]);
+        if (tokenObject)
+        {
+            if (!Utils::AttributeUtils::packAttributes(slotId,
+                                                       ulongAttributes,
+                                                       strAttributes,
+                                                       boolAttributes,
+                                                       &packedAttributes))
+            {
+                rv = CKR_GENERAL_ERROR;
+                break;
+            }
+        }
+
+        rv = P11Crypto::SymmetricProvider::generateAesKey(symKeyParams, importKey, packedAttributes, phKey);
         if (CKR_OK != rv)
         {
             break;
@@ -174,13 +199,11 @@ CK_RV generateKey(CK_SESSION_HANDLE    hSession,
             }
         }
 
-        ulongAttributes.insert(UlongAttributeType(CKA_KEY_GEN_MECHANISM, CKM_AES_KEY_GEN));
-
         uint32_t sessionId = hSession & std::numeric_limits<uint32_t>::max();
 
         ObjectParameters objectParams {};
 
-        objectParams.slotId          = gSessionCache->getSlotId(hSession);
+        objectParams.slotId          = slotId;
         objectParams.sessionHandle   = sessionId;
         objectParams.ulongAttributes = ulongAttributes;
         objectParams.strAttributes   = strAttributes;
@@ -221,6 +244,10 @@ CK_RV generateKeyPair(CK_SESSION_HANDLE    hSession,
             break;
         }
 
+        bool ecKpGeneration  = (CKM_EC_KEY_PAIR_GEN == pMechanism->mechanism);
+        bool rsaKpGeneration = (CKM_RSA_PKCS_KEY_PAIR_GEN == pMechanism->mechanism);
+        bool edKpGeneration  = (CKM_EC_EDWARDS_KEY_PAIR_GEN == pMechanism->mechanism);
+
         if (!hSession || !gSessionCache->find(hSession))
         {
             rv = CKR_SESSION_HANDLE_INVALID;
@@ -257,7 +284,7 @@ CK_RV generateKeyPair(CK_SESSION_HANDLE    hSession,
             break;
         }
 
-        if (CKM_RSA_PKCS_KEY_PAIR_GEN == pMechanism->mechanism)
+        if (rsaKpGeneration)
         {
             rv = Utils::AttributeUtils::getRsaKeyGenParameters(publicUlongAttributes,
                                                                publicStrAttributes,
@@ -284,6 +311,39 @@ CK_RV generateKeyPair(CK_SESSION_HANDLE    hSession,
                 break;
             }
         }
+        else if (ecKpGeneration || edKpGeneration)
+        {
+            rv = Utils::AttributeUtils::getEcKeyGenParameters(publicStrAttributes, &asymKeyParams);
+            if (CKR_OK != rv)
+            {
+                break;
+            }
+
+            if (KeyGenerationMechanism::invalid == asymKeyParams.keyGenMechanism ||
+                asymKeyParams.curveOid.empty())
+            {
+                rv = CKR_TEMPLATE_INCOMPLETE;
+                break;
+            }
+
+            if (edKpGeneration)
+            {
+                asymKeyParams.keyGenMechanism = KeyGenerationMechanism::edGeneratePublicKey;
+            }
+
+            Utils::AttributeUtils::addDefaultAttributes(asymKeyParams.keyGenMechanism, &publicBoolAttributes);
+
+            if (!validateEcKeyGenAttributes(asymKeyParams.keyGenMechanism, publicAttrValStruct, publicBoolAttributes))
+            {
+                rv = CKR_TEMPLATE_INCONSISTENT;
+                break;
+            }
+        }
+        else
+        {
+            rv = CKR_MECHANISM_INVALID;
+            break;
+        }
 
         StringAttributeSet privateStrAttributes{};
         UlongAttributeSet  privateUlongAttributes{};
@@ -307,54 +367,106 @@ CK_RV generateKeyPair(CK_SESSION_HANDLE    hSession,
             break;
         }
 
-        if (CKM_RSA_PKCS_KEY_PAIR_GEN == pMechanism->mechanism)
+        bool tokenObjectPublicKey  = publicBoolAttributes.test(Utils::AttributeUtils::p11AttributeToBoolAttribute[CKA_TOKEN]);
+        bool tokenObjectPrivateKey = privateBoolAttributes.test(Utils::AttributeUtils::p11AttributeToBoolAttribute[CKA_TOKEN]);
+
+        std::vector<CK_ULONG> packedAttributesPublic, packedAttributesPrivate;
+
+        CK_SLOT_ID slotId = gSessionCache->getSlotId(hSession);
+        if (slotId > maxSlotsSupported)
         {
-            asymKeyParams.keyGenMechanism = KeyGenerationMechanism::rsaGeneratePrivateKey;
-
-            Utils::AttributeUtils::addDefaultAttributes(asymKeyParams.keyGenMechanism, &privateBoolAttributes);
-
-            if (!Utils::AttributeUtils::validateRsaKeyGenAttributes(asymKeyParams.keyGenMechanism, privateAttrValStruct))
-            {
-                rv = CKR_ATTRIBUTE_VALUE_INVALID;
-                break;
-            }
-
-            rv = P11Crypto::AsymmetricProvider::generateRsaKeyPair(asymKeyParams,
-                                                                   phPublicKey,
-                                                                   phPrivateKey);
-            if (CKR_OK != rv)
-            {
-                break;
-            }
-
-            publicUlongAttributes.insert(UlongAttributeType(CKA_KEY_GEN_MECHANISM, CKM_RSA_PKCS_KEY_PAIR_GEN));
-            privateUlongAttributes.insert(UlongAttributeType(CKA_KEY_GEN_MECHANISM, CKM_RSA_PKCS_KEY_PAIR_GEN));
+            rv = CKR_GENERAL_ERROR;
+            break;
         }
-        else if (CKM_RSA_PBIND_IMPORT == pMechanism->mechanism)
+
+        if (rsaKpGeneration || ecKpGeneration || edKpGeneration)
         {
-            // Validate Public Key attributes
-            KeyGenerationMechanism keyGenMechanism = KeyGenerationMechanism::rsaImportPbindPublicKey;
-
-            if (!Utils::AttributeUtils::validateRsaKeyGenAttributes(keyGenMechanism, publicAttrValStruct))
+            if (rsaKpGeneration)
             {
-                rv = CKR_ATTRIBUTE_VALUE_INVALID;
-                break;
+                asymKeyParams.keyGenMechanism = KeyGenerationMechanism::rsaGeneratePrivateKey;
+                Utils::AttributeUtils::addDefaultAttributes(asymKeyParams.keyGenMechanism, &privateBoolAttributes);
+
+                if (!Utils::AttributeUtils::validateRsaKeyGenAttributes(asymKeyParams.keyGenMechanism, privateAttrValStruct))
+                {
+                    rv = CKR_ATTRIBUTE_VALUE_INVALID;
+                    break;
+                }
+
+                publicUlongAttributes.insert(UlongAttributeType(CKA_KEY_GEN_MECHANISM, CKM_RSA_PKCS_KEY_PAIR_GEN));
+                privateUlongAttributes.insert(UlongAttributeType(CKA_KEY_GEN_MECHANISM, CKM_RSA_PKCS_KEY_PAIR_GEN));
+            }
+            else if (ecKpGeneration)
+            {
+                asymKeyParams.keyGenMechanism = KeyGenerationMechanism::ecGeneratePrivateKey;
+                Utils::AttributeUtils::addDefaultAttributes(asymKeyParams.keyGenMechanism, &privateBoolAttributes);
+
+                if (!Utils::AttributeUtils::validateEcKeyGenAttributes(asymKeyParams.keyGenMechanism, privateAttrValStruct, privateBoolAttributes))
+                {
+                    rv = CKR_ATTRIBUTE_VALUE_INVALID;
+                    break;
+                }
+
+                publicUlongAttributes.insert(UlongAttributeType(CKA_KEY_GEN_MECHANISM, CKM_EC_KEY_PAIR_GEN));
+                privateUlongAttributes.insert(UlongAttributeType(CKA_KEY_GEN_MECHANISM, CKM_EC_KEY_PAIR_GEN));
+            }
+            else if (edKpGeneration)
+            {
+                asymKeyParams.keyGenMechanism = KeyGenerationMechanism::edGeneratePrivateKey;
+                Utils::AttributeUtils::addDefaultAttributes(asymKeyParams.keyGenMechanism, &privateBoolAttributes);
+
+                if (!Utils::AttributeUtils::validateEcKeyGenAttributes(asymKeyParams.keyGenMechanism, privateAttrValStruct, privateBoolAttributes))
+                {
+                    rv = CKR_ATTRIBUTE_VALUE_INVALID;
+                    break;
+                }
+
+                publicUlongAttributes.insert(UlongAttributeType(CKA_KEY_GEN_MECHANISM, CKM_EC_EDWARDS_KEY_PAIR_GEN));
+                privateUlongAttributes.insert(UlongAttributeType(CKA_KEY_GEN_MECHANISM, CKM_EC_EDWARDS_KEY_PAIR_GEN));
             }
 
-            // Validate Private Key attributes
-            keyGenMechanism = KeyGenerationMechanism::rsaImportPbindPrivateKey;
-
-            if (!Utils::AttributeUtils::validateRsaKeyGenAttributes(keyGenMechanism, privateAttrValStruct))
+            if (tokenObjectPrivateKey)
             {
-                rv = CKR_ATTRIBUTE_VALUE_INVALID;
-                break;
+                if (!Utils::AttributeUtils::packAttributes(slotId,
+                                                           privateUlongAttributes,
+                                                           privateStrAttributes,
+                                                           privateBoolAttributes,
+                                                           &packedAttributesPrivate))
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
             }
 
-            std::vector<uint8_t> platformBoundKey = Utils::AttributeUtils::getRsaSealedKeyFromMechanism(pMechanism);
+            if (tokenObjectPublicKey)
+            {
+                if (!Utils::AttributeUtils::packAttributes(slotId,
+                                                           publicUlongAttributes,
+                                                           publicStrAttributes,
+                                                           publicBoolAttributes,
+                                                           &packedAttributesPublic))
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
+            }
 
-            rv = P11Crypto::AsymmetricProvider::importRsaPlatformBoundKey(platformBoundKey,
-                                                                          phPublicKey,
-                                                                          phPrivateKey);
+            if (rsaKpGeneration)
+            {
+                rv = P11Crypto::AsymmetricProvider::generateRsaKeyPair(asymKeyParams,
+                                                                       packedAttributesPublic,
+                                                                       packedAttributesPrivate,
+                                                                       phPublicKey,
+                                                                       phPrivateKey);
+            }
+            else if (ecKpGeneration || edKpGeneration)
+            {
+                rv = P11Crypto::AsymmetricProvider::generateEcc(asymKeyParams,
+                                                                packedAttributesPublic,
+                                                                packedAttributesPrivate,
+                                                                phPublicKey,
+                                                                phPrivateKey);
+            }
+
             if (CKR_OK != rv)
             {
                 break;
@@ -379,7 +491,7 @@ CK_RV generateKeyPair(CK_SESSION_HANDLE    hSession,
 
         gSessionCache->addObject(sessionId, *phPublicKey, objectParams);
 
-        if (*phPrivateKey)  // In cases where no private key is present in the pbind blob that's imported.
+        if (*phPrivateKey)
         {
             objectParams.slotId          = gSessionCache->getSlotId(hSession);
             objectParams.sessionHandle   = sessionId;
@@ -509,6 +621,17 @@ static CK_RV populateWrapParameters(const CK_MECHANISM_PTR pMechanism,
             }
 
             *wrapMode = WrapMode::Rsa;
+            wrapParams->rsaParams.rsaPadding = RsaPadding::rsaPkcs1;
+            break;
+
+        case CKM_RSA_PKCS_OAEP:
+            if (pMechanism->pParameter || (0 != pMechanism->ulParameterLen))
+            {
+                rv = CKR_ARGUMENTS_BAD;
+                break;
+            }
+
+            *wrapMode = WrapMode::Rsa;
             wrapParams->rsaParams.rsaPadding = RsaPadding::rsaPkcs1Oaep;
             break;
 
@@ -565,26 +688,6 @@ static CK_RV populateWrapParameters(const CK_MECHANISM_PTR pMechanism,
 
             break;
 #endif
-        case CKM_AES_PBIND:
-            if (pMechanism->pParameter || (0 != pMechanism->ulParameterLen))
-            {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
-
-            *wrapMode = WrapMode::AesPBind;
-            break;
-
-        case CKM_RSA_PBIND_EXPORT:
-            if (pMechanism->pParameter || (0 != pMechanism->ulParameterLen))
-            {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
-
-            *wrapMode = WrapMode::RsaPBind;
-            break;
-
         default:
             rv = CKR_MECHANISM_INVALID;
             break;
@@ -692,95 +795,6 @@ static CK_RV rsaWrapKey(const CK_OBJECT_HANDLE& hWrappingKey,
                                                     rsaCryptParams,
                                                     pWrappedKey, destBufferLen,
                                                     &destBufferLenRequired);
-        if (CKR_OK != rv)
-        {
-            break;
-        }
-
-        *pulWrappedKeyLen = destBufferLenRequired;
-    } while (false);
-
-    return rv;
-}
-
-//---------------------------------------------------------------------------------------------
-static CK_RV aesPlatformBindKey(const CK_OBJECT_HANDLE& hWrappingKey,
-                                const CK_OBJECT_HANDLE& hKey,
-                                CK_BYTE_PTR             pWrappedKey,
-                                CK_ULONG_PTR            pulWrappedKeyLen)
-{
-    CK_RV rv = CKR_FUNCTION_FAILED;
-
-    do
-    {
-        // Wrapping key Id should be null for pbind operations
-        if (hWrappingKey || !pulWrappedKeyLen)
-        {
-            rv = CKR_ARGUMENTS_BAD;
-            break;
-        }
-
-        if (!isInitialized() || !gSessionCache)
-        {
-            rv = CKR_CRYPTOKI_NOT_INITIALIZED;
-            break;
-        }
-
-        if (!gSessionCache->checkKeyType(hKey, CKK_AES))
-        {
-            rv = CKR_KEY_HANDLE_INVALID;
-            break;
-        }
-
-        uint32_t destBufferLenRequired  = 0;
-        uint32_t destBufferLen = *pulWrappedKeyLen;
-        rv = P11Crypto::SymmetricProvider::platformbindKey(hKey,
-                                                           pWrappedKey, destBufferLen,
-                                                           &destBufferLenRequired);
-        if (CKR_OK != rv)
-        {
-            break;
-        }
-
-        *pulWrappedKeyLen = destBufferLenRequired;
-    } while (false);
-
-    return rv;
-}
-
-static CK_RV rsaPlatformBindKey(const CK_OBJECT_HANDLE& hWrappingKey,
-                                const CK_OBJECT_HANDLE& hKey,
-                                CK_BYTE_PTR             pWrappedKey,
-                                CK_ULONG_PTR            pulWrappedKeyLen)
-{
-    CK_RV rv = CKR_FUNCTION_FAILED;
-
-    do
-    {
-        // Wrapping key Id should be null for pbind operations
-        if (hWrappingKey || !pulWrappedKeyLen)
-        {
-            rv = CKR_ARGUMENTS_BAD;
-            break;
-        }
-
-        if (!isInitialized() || !gSessionCache)
-        {
-            rv = CKR_CRYPTOKI_NOT_INITIALIZED;
-            break;
-        }
-
-        if (!gSessionCache->checkKeyType(hKey, CKK_RSA))
-        {
-            rv = CKR_KEY_HANDLE_INVALID;
-            break;
-        }
-
-        uint32_t destBufferLenRequired  = 0;
-        uint32_t destBufferLen = *pulWrappedKeyLen;
-        rv = P11Crypto::AsymmetricProvider::platformbindKey(hKey,
-                                                            pWrappedKey, destBufferLen,
-                                                            &destBufferLenRequired);
         if (CKR_OK != rv)
         {
             break;
@@ -920,7 +934,7 @@ CK_RV wrapKey(CK_SESSION_HANDLE hSession,
             break;
         }
 
-        if (hWrappingKey) // hWrappingKey can be nullptr for platform binding scenarios.
+        if (hWrappingKey)
         {
             if (!gSessionCache->findObject(hWrappingKey))
             {
@@ -959,6 +973,13 @@ CK_RV wrapKey(CK_SESSION_HANDLE hSession,
                                 wrapParams.aesParams,
                                 pWrappedKey,
                                 pulWrappedKeyLen);
+
+                if (CKR_OK == rv && !gSessionCache->setWrappingStatus(hWrappingKey))
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
+
                 break;
 
             case WrapMode::Rsa:
@@ -967,20 +988,13 @@ CK_RV wrapKey(CK_SESSION_HANDLE hSession,
                                 wrapParams.rsaParams,
                                 pWrappedKey,
                                 pulWrappedKeyLen);
-                break;
 
-            case WrapMode::AesPBind:
-                rv = aesPlatformBindKey(hWrappingKey,
-                                        hKey,
-                                        pWrappedKey,
-                                        pulWrappedKeyLen);
-                break;
+                if (CKR_OK == rv && !gSessionCache->setWrappingStatus(hWrappingKey))
+                {
+                    rv = CKR_GENERAL_ERROR;
+                    break;
+                }
 
-            case WrapMode::RsaPBind:
-                rv = rsaPlatformBindKey(hWrappingKey,
-                                        hKey,
-                                        pWrappedKey,
-                                        pulWrappedKeyLen);
                 break;
 
             case WrapMode::PublicKey:
@@ -1126,6 +1140,17 @@ static CK_RV populateUnwrapParameters(const CK_MECHANISM_PTR pMechanism,
             }
 
             *unwrapMode = WrapMode::Rsa;
+            unwrapParams->rsaParams.rsaPadding = RsaPadding::rsaPkcs1;
+            break;
+
+        case CKM_RSA_PKCS_OAEP:
+            if (pMechanism->pParameter || (0 != pMechanism->ulParameterLen))
+            {
+                rv = CKR_ARGUMENTS_BAD;
+                break;
+            }
+
+            *unwrapMode = WrapMode::Rsa;
             unwrapParams->rsaParams.rsaPadding = RsaPadding::rsaPkcs1Oaep;
             break;
 
@@ -1139,16 +1164,6 @@ static CK_RV populateUnwrapParameters(const CK_MECHANISM_PTR pMechanism,
             *unwrapMode = WrapMode::PublicKey;
             break;
 
-        case CKM_AES_PBIND:
-            if (pMechanism->pParameter || (0 != pMechanism->ulParameterLen))
-            {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
-
-            *unwrapMode = WrapMode::AesPBind;
-            break;
-
         default:
             rv = CKR_MECHANISM_INVALID;
             break;
@@ -1158,12 +1173,13 @@ static CK_RV populateUnwrapParameters(const CK_MECHANISM_PTR pMechanism,
 }
 
 //---------------------------------------------------------------------------------------------
-static CK_RV unwrapWithAesKey(const CK_OBJECT_HANDLE& hUnwrappingKey,
-                              const CK_BYTE_PTR       pWrappedKey,
-                              const CK_ULONG&         ulWrappedKeyLen,
-                              const AesCryptParams&   aesUnwrapParams,
-                              const KeyType&          wrappedKeyType,
-                              CK_OBJECT_HANDLE_PTR    hKey)
+static CK_RV unwrapWithAesKey(const CK_OBJECT_HANDLE&      hUnwrappingKey,
+                              const CK_BYTE_PTR            pWrappedKey,
+                              const CK_ULONG&              ulWrappedKeyLen,
+                              const AesCryptParams&        aesUnwrapParams,
+                              const KeyType&               wrappedKeyType,
+                              const std::vector<CK_ULONG>& packedAttributes,
+                              CK_OBJECT_HANDLE_PTR         hKey)
 {
     CK_RV rv = CKR_FUNCTION_FAILED;
 
@@ -1193,6 +1209,7 @@ static CK_RV unwrapWithAesKey(const CK_OBJECT_HANDLE& hUnwrappingKey,
                                                      pWrappedKey, ulWrappedKeyLen,
                                                      aesUnwrapParams,
                                                      wrappedKeyType,
+                                                     packedAttributes,
                                                      reinterpret_cast<uint32_t*>(hKey));
         if (CKR_OK != rv)
         {
@@ -1204,11 +1221,12 @@ static CK_RV unwrapWithAesKey(const CK_OBJECT_HANDLE& hUnwrappingKey,
 }
 
 //---------------------------------------------------------------------------------------------
-static CK_RV rsaUnwrapKey(const CK_OBJECT_HANDLE& hUnwrappingKey,
-                          const CK_BYTE_PTR       pWrappedKey,
-                          const CK_ULONG&         ulWrappedKeyLen,
-                          const RsaCryptParams&   rsaUnwrapParams,
-                          CK_OBJECT_HANDLE_PTR    hKey)
+static CK_RV rsaUnwrapKey(const CK_OBJECT_HANDLE&      hUnwrappingKey,
+                          const CK_BYTE_PTR            pWrappedKey,
+                          const CK_ULONG&              ulWrappedKeyLen,
+                          const RsaCryptParams&        rsaUnwrapParams,
+                          const std::vector<CK_ULONG>& packedAttributes,
+                          CK_OBJECT_HANDLE_PTR         hKey)
 {
     CK_RV rv = CKR_FUNCTION_FAILED;
 
@@ -1237,6 +1255,7 @@ static CK_RV rsaUnwrapKey(const CK_OBJECT_HANDLE& hUnwrappingKey,
         rv = P11Crypto::AsymmetricProvider::unwrapKey(hUnwrappingKey,
                                                       pWrappedKey, ulWrappedKeyLen,
                                                       rsaUnwrapParams,
+                                                      packedAttributes,
                                                       reinterpret_cast<uint32_t*>(hKey));
     } while (false);
 
@@ -1244,40 +1263,11 @@ static CK_RV rsaUnwrapKey(const CK_OBJECT_HANDLE& hUnwrappingKey,
 }
 
 //---------------------------------------------------------------------------------------------
-static CK_RV aesImportPlatformBoundKey(const CK_OBJECT_HANDLE& hUnwrappingKey,
-                                       const CK_BYTE_PTR       pWrappedKey,
-                                       const CK_ULONG&         ulWrappedKeyLen,
-                                       CK_OBJECT_HANDLE_PTR    hKey)
-{
-    CK_RV rv = CKR_FUNCTION_FAILED;
-
-    do
-    {
-        if (!isInitialized())
-        {
-            rv = CKR_CRYPTOKI_NOT_INITIALIZED;
-            break;
-        }
-
-        // Unwrapping key Id should be null for pbind operations
-        if (hUnwrappingKey || !pWrappedKey || !hKey)
-        {
-            rv = CKR_ARGUMENTS_BAD;
-            break;
-        }
-
-        rv = P11Crypto::SymmetricProvider::importPlatformBoundKey(pWrappedKey, ulWrappedKeyLen,
-                                                                  reinterpret_cast<uint32_t*>(hKey));
-    } while (false);
-
-    return rv;
-}
-
-//---------------------------------------------------------------------------------------------
-static CK_RV rsaImportPublicKey(const CK_OBJECT_HANDLE& hUnwrappingKey,
-                                const CK_BYTE_PTR       pWrappedKey,
-                                const CK_ULONG&         ulWrappedKeyLen,
-                                CK_OBJECT_HANDLE_PTR    hKey)
+static CK_RV rsaImportPublicKey(const CK_OBJECT_HANDLE&      hUnwrappingKey,
+                                const CK_BYTE_PTR            pWrappedKey,
+                                const CK_ULONG&              ulWrappedKeyLen,
+                                const std::vector<CK_ULONG>& packedAttributes,
+                                CK_OBJECT_HANDLE_PTR         hKey)
 {
     CK_RV rv = CKR_FUNCTION_FAILED;
 
@@ -1297,6 +1287,7 @@ static CK_RV rsaImportPublicKey(const CK_OBJECT_HANDLE& hUnwrappingKey,
         }
 
         rv = P11Crypto::AsymmetricProvider::importKey(pWrappedKey, ulWrappedKeyLen,
+                                                      packedAttributes,
                                                       reinterpret_cast<uint32_t*>(hKey));
     } while (false);
 
@@ -1340,7 +1331,7 @@ CK_RV unwrapKey(CK_SESSION_HANDLE    hSession,
             break;
         }
 
-        if (hUnwrappingKey) // hUnwrappingKey can be nullptr for platform binding scenarios.
+        if (hUnwrappingKey)
         {
             if (!gSessionCache->findObject(hUnwrappingKey))
             {
@@ -1390,6 +1381,29 @@ CK_RV unwrapKey(CK_SESSION_HANDLE    hSession,
             unwrapMode = WrapMode::AesWrapRsa;
         }
 
+        std::vector<CK_ULONG> packedAttributes;
+
+        bool tokenObject = boolAttributes.test(Utils::AttributeUtils::p11AttributeToBoolAttribute[CKA_TOKEN]);
+        if (tokenObject)
+        {
+            CK_SLOT_ID slotId = gSessionCache->getSlotId(hSession);
+            if (slotId > maxSlotsSupported)
+            {
+                rv = CKR_GENERAL_ERROR;
+                break;
+            }
+
+            if (!Utils::AttributeUtils::packAttributes(slotId,
+                                                       ulongAttributes,
+                                                       strAttributes,
+                                                       boolAttributes,
+                                                       &packedAttributes))
+            {
+                rv = CKR_GENERAL_ERROR;
+                break;
+            }
+        }
+
         switch (unwrapMode)
         {
             case WrapMode::Aes:
@@ -1407,11 +1421,12 @@ CK_RV unwrapKey(CK_SESSION_HANDLE    hSession,
                                       pWrappedKey, ulWrappedKeyLen,
                                       unwrapParams.aesParams,
                                       wrappedKeyType,
+                                      packedAttributes,
                                       hKey);
                 break;
 
             case WrapMode::Rsa:
-                keyGenMechanism = CKM_RSA_PKCS;
+                keyGenMechanism = pMechanism->mechanism;
 
                 keyGenerationMechanism = KeyGenerationMechanism::rsaUnwrapKey;
                 if (!Utils::AttributeUtils::validateAesKeyGenAttributes(keyGenerationMechanism, attrValStruct))
@@ -1423,22 +1438,8 @@ CK_RV unwrapKey(CK_SESSION_HANDLE    hSession,
                 rv = rsaUnwrapKey(hUnwrappingKey,
                                   pWrappedKey, ulWrappedKeyLen,
                                   unwrapParams.rsaParams,
+                                  packedAttributes,
                                   hKey);
-                break;
-
-            case WrapMode::AesPBind:
-                keyGenMechanism = CKM_AES_PBIND;
-
-                keyGenerationMechanism = KeyGenerationMechanism::aesImportPbindKey;
-                if (!Utils::AttributeUtils::validateAesKeyGenAttributes(keyGenerationMechanism, attrValStruct))
-                {
-                    rv = CKR_ATTRIBUTE_VALUE_INVALID;
-                    break;
-                }
-
-                rv = aesImportPlatformBoundKey(hUnwrappingKey,
-                                               pWrappedKey, ulWrappedKeyLen,
-                                               hKey);
                 break;
 
             case WrapMode::PublicKey:
@@ -1456,6 +1457,7 @@ CK_RV unwrapKey(CK_SESSION_HANDLE    hSession,
 
                 rv = rsaImportPublicKey(hUnwrappingKey,
                                         pWrappedKey, ulWrappedKeyLen,
+                                        packedAttributes,
                                         hKey);
                 break;
 
@@ -1468,6 +1470,7 @@ CK_RV unwrapKey(CK_SESSION_HANDLE    hSession,
                                       pWrappedKey, ulWrappedKeyLen,
                                       unwrapParams.aesParams,
                                       wrappedKeyType,
+                                      packedAttributes,
                                       hKey);
                 break;
 

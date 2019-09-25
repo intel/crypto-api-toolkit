@@ -36,9 +36,10 @@ namespace P11Crypto
     namespace SymmetricProvider
     {
         //---------------------------------------------------------------------------------------------
-        CK_RV generateAesKey(const SymmetricKeyParams& symKeyParams,
-                             const bool&               importKey,
-                             CK_OBJECT_HANDLE_PTR      phKey)
+        CK_RV generateAesKey(const SymmetricKeyParams&    symKeyParams,
+                             const bool&                  importKey,
+                             const std::vector<CK_ULONG>& packedAttributes,
+                             CK_OBJECT_HANDLE_PTR         phKey)
         {
             CK_RV          rv            = CKR_FUNCTION_FAILED;
             sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
@@ -60,7 +61,9 @@ namespace P11Crypto
                                                reinterpret_cast<int32_t*>(&enclaveStatus),
                                                &keyHandle,
                                                symKeyParams.rawKeyBuffer.data(),
-                                               symKeyParams.rawKeyBuffer.size());
+                                               symKeyParams.rawKeyBuffer.size(),
+                                               packedAttributes.data(),
+                                               packedAttributes.size() * sizeof(CK_ULONG));
 #endif
             }
             else
@@ -68,7 +71,9 @@ namespace P11Crypto
                 sgxStatus = generateSymmetricKey(enclaveHelpers.getSgxEnclaveId(),
                                                  reinterpret_cast<int32_t*>(&enclaveStatus),
                                                  &keyHandle,
-                                                 symKeyParams.keyLength);
+                                                 symKeyParams.keyLength,
+                                                 packedAttributes.data(),
+                                                 packedAttributes.size() * sizeof(CK_ULONG));
             }
 
 
@@ -307,38 +312,13 @@ namespace P11Crypto
         }
 
         //---------------------------------------------------------------------------------------------
-        CK_RV platformbindKey(const uint32_t& keyHandle,
-                              uint8_t*        destBuffer,
-                              const uint32_t& destBufferLen,
-                              uint32_t*       destBufferLenRequired)
-        {
-            CK_RV               rv              = CKR_FUNCTION_FAILED;
-            sgx_status_t        sgxStatus       = sgx_status_t::SGX_ERROR_UNEXPECTED;
-            SgxCryptStatus      enclaveStatus   = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-            EnclaveHelpers      enclaveHelpers;
-
-            do
-            {
-                sgxStatus = platformBindSymmetricKey(enclaveHelpers.getSgxEnclaveId(),
-                                                     reinterpret_cast<int32_t*>(&enclaveStatus),
-                                                     keyHandle,
-                                                     destBuffer, destBufferLen,
-                                                     destBufferLenRequired);
-
-                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
-
-            } while (false);
-
-            return rv;
-        }
-
-        //---------------------------------------------------------------------------------------------
-        CK_RV unwrapKey(const uint32_t&       unwrappingKeyHandle,
-                        const uint8_t*        sourceBuffer,
-                        const uint32_t&       sourceBufferLen,
-                        const AesCryptParams& aesCryptParams,
-                        const KeyType&        wrappedKeyType,
-                        uint32_t*             keyHandle)
+        CK_RV unwrapKey(const uint32_t&              unwrappingKeyHandle,
+                        const uint8_t*               sourceBuffer,
+                        const uint32_t&              sourceBufferLen,
+                        const AesCryptParams&        aesCryptParams,
+                        const KeyType&               wrappedKeyType,
+                        const std::vector<CK_ULONG>& packedAttributes,
+                        uint32_t*                    keyHandle)
         {
             CK_RV          rv                 = CKR_FUNCTION_FAILED;
             sgx_status_t   sgxStatus          = sgx_status_t::SGX_ERROR_UNEXPECTED;
@@ -365,7 +345,9 @@ namespace P11Crypto
                                                    static_cast<int>(aesCryptParams.padding),
                                                    aesCryptParams.tagBits,
                                                    aesCryptParams.counterBits,
-                                                   static_cast<uint8_t>(wrappedKeyType));
+                                                   static_cast<uint8_t>(wrappedKeyType),
+                                                   packedAttributes.data(),
+                                                   packedAttributes.size() * sizeof(CK_ULONG));
 
                 rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
                 if (CKR_OK != rv)
@@ -374,36 +356,6 @@ namespace P11Crypto
                 }
 
                 *keyHandle = unwrappedKeyHandle;
-
-            } while (false);
-
-            return rv;
-        }
-
-        //---------------------------------------------------------------------------------------------
-        CK_RV importPlatformBoundKey(const uint8_t*  sourceBuffer,
-                                     const uint32_t& sourceBufferLen,
-                                     uint32_t*       keyHandle)
-        {
-            CK_RV          rv            = CKR_FUNCTION_FAILED;
-            sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
-            SgxCryptStatus enclaveStatus = SgxCryptStatus::SGX_CRYPT_STATUS_SUCCESS;
-            EnclaveHelpers enclaveHelpers;
-
-            do
-            {
-                if (!keyHandle || !sourceBuffer)
-                {
-                    rv = CKR_ARGUMENTS_BAD;
-                    break;
-                }
-
-                sgxStatus = unwrapAndImportPlatformBoundSymmetricKey(enclaveHelpers.getSgxEnclaveId(),
-                                                                     reinterpret_cast<int32_t*>(&enclaveStatus),
-                                                                     keyHandle,
-                                                                     sourceBuffer, sourceBufferLen);
-
-                rv = Utils::EnclaveUtils::getPkcsStatus(sgxStatus, enclaveStatus);
 
             } while (false);
 

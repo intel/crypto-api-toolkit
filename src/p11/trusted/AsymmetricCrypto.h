@@ -35,9 +35,14 @@
 #include "AsymmetricKeyCache.h"
 #include "ByteBuffer.h"
 #include "Constants.h"
+#include "TokenObjectParser.h"
 
 #include <string>
 #include <openssl/rsa.h>
+#include <openssl/ec.h>
+#include <openssl/x509.h>
+
+#include <openssl/err.h>
 
 namespace CryptoSgx
 {
@@ -82,7 +87,12 @@ namespace CryptoSgx
          */
         SgxStatus generateAsymmetricKey(const uint32_t&          publicKeyId,
                                         const uint32_t&          privateKeyId,
-                                        const AsymmetricKeySize& modulusLength);
+                                        const AsymmetricKeySize& modulusLength,
+                                        const uint64_t*          attributeBufferPublic,
+                                        const uint64_t&          attributeBufferPublicLen,
+                                        const uint64_t*          attributeBufferPrivate,
+                                        const uint64_t&          attributeBufferPrivateLen,
+                                        const ByteBuffer&        pinMaterial);
 
         /**
         * Removes an existing asymmetric key pair from the key cache
@@ -90,6 +100,30 @@ namespace CryptoSgx
         * @return   SgxStatus  value - SGX_CRYPT_STATUS_SUCCESS when success or error code otherwise
         */
         SgxStatus removeAsymmetricKey(const uint32_t& keyId);
+
+        SgxStatus addEcKey(const uint32_t&     keyId,
+                           const std::string&  tokenObjectFilePath,
+                           const uint8_t*      encodedKey,
+                           const uint64_t&     encodedKeyLen,
+                           const KeyClassType& keyClassType,
+                           const bool&         usedForWrapping,
+                           const uint64_t&     pairKeyId);
+
+        SgxStatus addEdKey(const uint32_t&     keyId,
+                           const std::string&  tokenObjectFilePath,
+                           const uint8_t*      encodedKey,
+                           const uint64_t&     encodedKeyLen,
+                           const KeyClassType& keyClassType,
+                           const bool&         usedForWrapping,
+                           const uint64_t&     pairKeyId);
+
+        SgxStatus addAsymmetricKey(const uint32_t&     keyId,
+                                   const std::string&  tokenObjectFilePath,
+                                   const uint8_t*      encodedKey,
+                                   const uint64_t&     encodedKeyLen,
+                                   const KeyClassType& keyClassType,
+                                   const bool&         usedForWrapping,
+                                   const uint64_t&     pairKeyId);
 
         /**
         * Encrypts a buffer using the public key
@@ -153,11 +187,14 @@ namespace CryptoSgx
         * @param exponentBufferLen   The length of exponent buffer
         * @return                    SgxStatus value - SGX_CRYPT_STATUS_SUCCESS when success or error code otherwise
         */
-        SgxStatus importPublicKey(const uint32_t& keyId,
-                                  uint8_t*        modulusBuffer,
-                                  const uint32_t& modulusBufferLen,
-                                  uint8_t*        exponentBuffer,
-                                  const uint32_t& exponentBufferLen);
+        SgxStatus importPublicKey(const uint32_t&   keyId,
+                                  uint8_t*          modulusBuffer,
+                                  const uint32_t&   modulusBufferLen,
+                                  uint8_t*          exponentBuffer,
+                                  const uint32_t&   exponentBufferLen,
+                                  const uint64_t*   attributeBuffer,
+                                  const uint64_t&   attributeBufferLen,
+                                  const ByteBuffer& pinMaterial);
 
         /**
         * Computes the sha256 Hash of the formatted public key.
@@ -221,51 +258,41 @@ namespace CryptoSgx
                              const uint32_t&   salt);
 
         /**
-        * Platform binds an asymmetric key
-        * @param keyId                      The key Id from provider
-        * @param destBuffer                 The destination buffer where the platform bound data goes into
-        * @param destBufferLen              The length of destination buffer
-        * @param destBufferRequiredLength   The length of destination buffer that will be required to hold platform bound output
-        * @return                           SgxStatus value - SGX_CRYPT_STATUS_SUCCESS when success or error code otherwise
-        */
-        SgxStatus exportAsymmetricKeyPbind(const uint32_t&  keyId,
-                                           uint8_t*         destBuffer,
-                                           const uint32_t&  destBufferLen,
-                                           uint32_t*        destBufferRequiredLength);
-
-        /**
-        * Un platform binds a buffer and adds the resulting key in the cache
-        * @param publicKeyId        The public key Id from provider
-        * @param privateKeyId       The private key Id from provider
-        * @param sourceBuffer       The platform bound buffer
-        * @param sourceBufferLen    The length of the input buffer
-        * @return                   SgxStatus value - SGX_CRYPT_STATUS_SUCCESS when success or error code otherwise
-        */
-        SgxStatus importAsymmetricKeyPbind(uint32_t*        publicKeyId,
-                                           uint32_t*        privateKeyId,
-                                           const uint8_t*   sourceBuffer,
-                                           const uint32_t&  sourceBufferLen);
-
-        /**
-        * Marks a key Id to track that it is used for wrapping another key
-        * @param keyId      The key Id from provider
-        */
-        void markAsWrappingKey(const uint32_t& keyId);
-
-        /**
-        * Checks if the key Id passed is marked as wrapping key
-        * @param keyId  The key Id from provider
-        * @return       True if keyId is marked as a wrapping keyId, False otherwise
-        */
-        bool checkWrappingStatus(const uint32_t& keyId);
-
-        /**
          * Adds a symmetric key into cache.
          * @param keyId          The key Id from provider
          * @param asymmetricKey  The asymmetric key.
          * @return               SgxStatus value - SGX_CRYPT_STATUS_SUCCESS when success or error code otherwise
          */
         SgxStatus addRsaPrivateKey(const uint32_t& keyId, const AsymmetricKey& asymmetricKey);
+
+        bool encodeRsaKey(const RSA* rsaKey, uint8_t** encodedKey, uint64_t* encodedKeySize, bool onlyPublicKey = false);
+
+        SgxStatus updateKeyFile(const uint32_t&   keyId,
+                                const uint8_t&    keyType,
+                                const uint64_t*   attributeBuffer,
+                                const uint64_t&   attributeBufferLen,
+                                const ByteBuffer& pinMaterial);
+
+        SgxStatus updateHandle(const uint32_t& keyHandle, const uint32_t& newKeyHandle);
+
+        SgxStatus generateEccKey(const uint32_t&      publicKeyId,
+                                 const uint32_t&      privateKeyId,
+                                 const unsigned char* curveOid,
+                                 const uint32_t&      curveOidLen,
+                                 const uint64_t*      attributeBufferPublic,
+                                 const uint64_t&      attributeBufferPublicLen,
+                                 const uint64_t*      attributeBufferPrivate,
+                                 const uint64_t&      attributeBufferPrivateLen,
+                                 const ByteBuffer&    pinMaterial);
+
+        SgxStatus getEcParams(const uint32_t& keyId,
+                              uint8_t*        destBuffer,
+                              const uint32_t& destBufferLen,
+                              uint32_t*       destBufferWritten);
+
+        SgxStatus setWrappingStatus(const uint32_t& keyId);
+
+        bool checkWrappingStatus(const uint32_t& keyId, const OperationType& type);
 
     private:
         bool encrypt(const AsymmetricKey&   asymmetricKey,
@@ -306,16 +333,76 @@ namespace CryptoSgx
                                 const uint32_t&       salt,
                                 SgxCryptStatus*       status);
 
-        bool exportPlatformBoundKey(const AsymmetricKey&    asymKey,
-                                    uint8_t*                destBuffer,
-                                    const uint32_t&         destBufferLen,
-                                    uint32_t*               destBufferWritten,
-                                    SgxCryptStatus*         status);
+        SgxStatus rsaSign(const uint32_t&   keyId,
+                          const uint8_t*    sourceBuffer,
+                          const uint32_t&   sourceBufferLen,
+                          uint8_t*          destBuffer,
+                          size_t            destBufferLen,
+                          uint32_t*         destBufferRequiredLength,
+                          const uint32_t    hashAlgorithm,
+                          const RsaPadding& rsaPadding,
+                          const HashMode&   hashMode,
+                          const uint32_t&   salt);
 
-        bool importPlatformBoundKey(AsymmetricKey*  asymKey,
-                                    const uint8_t*  sourceBuffer,
-                                    const uint32_t& sourceBufferLen,
-                                    SgxCryptStatus* status);
+        SgxStatus ecSign(const uint32_t& keyId,
+                         const uint8_t*  sourceBuffer,
+                         const uint32_t& sourceBufferLen,
+                         uint8_t*        destBuffer,
+                         size_t          destBufferLen,
+                         uint32_t*       destBufferRequiredLength);
+
+        SgxStatus edSign(const uint32_t& keyId,
+                         const uint8_t*  sourceBuffer,
+                         const uint32_t& sourceBufferLen,
+                         uint8_t*        destBuffer,
+                         size_t          destBufferLen,
+                         uint32_t*       destBufferRequiredLength);
+
+        SgxStatus rsaVerify(const uint32_t&   keyId,
+                            const uint8_t*    sourceBuffer,
+                            const uint32_t&   sourceBufferLen,
+                            const uint8_t*    signatureBuffer,
+                            const uint32_t&   signatureBufferLen,
+                            const uint32_t&   hashAlgorithm,
+                            const RsaPadding& rsaPadding,
+                            const HashMode&   hashMode,
+                            const uint32_t&   salt);
+
+        SgxStatus generateEcKey(const uint32_t&      publicKeyId,
+                                const uint32_t&      privateKeyId,
+                                const unsigned char* curveOid,
+                                const uint32_t&      curveOidLen,
+                                const uint64_t*      attributeBufferPublic,
+                                const uint64_t&      attributeBufferPublicLen,
+                                const uint64_t*      attributeBufferPrivate,
+                                const uint64_t&      attributeBufferPrivateLen,
+                                const ByteBuffer&    pinMaterial);
+
+        SgxStatus generateEdKey(const uint32_t&      publicKeyId,
+                                const uint32_t&      privateKeyId,
+                                const unsigned char* curveOid,
+                                const uint32_t&      curveOidLen,
+                                const uint64_t*      attributeBufferPublic,
+                                const uint64_t&      attributeBufferPublicLen,
+                                const uint64_t*      attributeBufferPrivate,
+                                const uint64_t&      attributeBufferPrivateLen,
+                                const ByteBuffer&    pinMaterial);
+
+#ifdef EC_VERIFY
+        SgxStatus ecVerify(const uint32_t& keyId,
+                           const uint8_t*  sourceBuffer,
+                           const uint32_t& sourceBufferLen,
+                           const uint8_t*  signatureBuffer,
+                           const uint32_t& signatureBufferLen);
+#endif
+
+#ifdef ED_VERIFY
+        SgxStatus edVerify(const uint32_t& keyId,
+                           const uint8_t*  sourceBuffer,
+                           const uint32_t& sourceBufferLen,
+                           const uint8_t*  signatureBuffer,
+                           const uint32_t& signatureBufferLen);
+#endif
 
         AsymmetricKeyCache mAsymmetricPublicKeyCache;
         AsymmetricKeyCache mAsymmetricPrivateKeyCache;
@@ -326,8 +413,12 @@ namespace CryptoSgx
         const uint32_t rsaF4                                = 0x10001L;
         const uint32_t rsaOeapSchemeAdditionalPlaceHolder   = 41;
         const uint32_t rsaPkcs1SchemeAdditionalPlaceholder  = 11;
-        const uint32_t rsaMaxPBindDataLength                = 0xF00L;
-        const uint32_t rsaMaxUnsealDataLength               = 0xF00L;
+
+        // Offsets for EC/ED keys
+        const uint8_t privateKeyLenOffset = 0;
+        const uint8_t derParamsLenOffset  = 1;
+        const uint8_t publicKeyLenOffset  = 2;
+        const uint8_t privateKeyOffset    = privateKeyLenOffset + derParamsLenOffset + publicKeyLenOffset;
     };
 } //CryptoSgx
 

@@ -38,6 +38,7 @@
 #include "IppDecrypt.h"
 #include "SymmetricKeyCache.h"
 #include "IppStateCache.h"
+#include "TokenObjectParser.h"
 #include <functional>
 
 namespace CryptoSgx
@@ -79,7 +80,10 @@ namespace CryptoSgx
          * @return              SgxStatus value - SGX_CRYPT_STATUS_SUCCESS when success or error code otherwise
          */
         SgxStatus generateSymmetricKey(const uint32_t&         keyId,
-                                       const SymmetricKeySize& inputKeySize);
+                                       const SymmetricKeySize& inputKeySize,
+                                       const uint64_t*         attributeBuffer,
+                                       const uint64_t&         attributeBufferLen,
+                                       const ByteBuffer&       pinMaterial);
         /**
          * Adds a symmetric key into cache.
          * @param keyId     The key Id from provider
@@ -88,6 +92,12 @@ namespace CryptoSgx
          */
         SgxStatus addSymmetricKey(const uint32_t&       keyId,
                                   const SymmetricKey&   symKey);
+
+        SgxStatus addSymmetricKey(const uint32_t&         keyId,
+                                  const std::string&      tokenObjectFilePath,
+                                  const uint8_t*          keyBuffer,
+                                  const SymmetricKeySize& keyBufferLen,
+                                  const bool&             usedForWrapping);
 
         /**
          * Removes a symmetric key for the given key Id.
@@ -144,30 +154,6 @@ namespace CryptoSgx
         bool getIppCtxState(const uint32_t& keyId,
                             IppCtxState*    ippCtxContext);
 
-        /**
-        * Platform binds a symmetric key associated with Key Id passed.
-        * @param keyId                  The key Id from the provider
-        * @param destBuffer             The destination buffer where the platform bound data goes into
-        * @param destBufferLen          The length of destination buffer
-        * @param destBufferWritten      The length of destination buffer that will be required to hold decrypted output
-        * @return                       SgxStatus value - SGX_CRYPT_STATUS_SUCCESS when success or error code otherwise
-        */
-        SgxStatus exportSymmetricKeyPbind(const uint32_t&     keyId,
-                                          uint8_t*            destBuffer,
-                                          const uint32_t&     destBufferLen,
-                                          uint32_t*           destBufferWritten);
-
-        /**
-        * Unseals the platform bound data and adds it to the cache.
-        * @param keyId              The key Id from the provider
-        * @param sourceBuffer       The input buffer to be unsealed and imported
-        * @param sourceBufferLen    The length of the input buffer
-        * @return                   SgxStatus value - SGX_CRYPT_STATUS_SUCCESS when success or error code otherwise
-        */
-        SgxStatus importSymmetricKeyPbind(const uint32_t&     keyId,
-                                          const uint8_t*      sourceBuffer,
-                                          const uint32_t&     sourceBufferLen);
-
 #ifdef IMPORT_RAW_KEY
         /**
         * Imports a buffer into the cache
@@ -176,23 +162,13 @@ namespace CryptoSgx
         * @param sourceBufferLen    The length of the input buffer
         * @return                   SgxStatus value - SGX_CRYPT_STATUS_SUCCESS when success or error code otherwise
         */
-        SgxStatus importRawKey(const uint32_t&    keyId,
-                               const uint8_t*     sourceBuffer,
-                               const uint16_t&    sourceBufferLen);
+        SgxStatus importRawKey(const uint32_t&   keyId,
+                               const uint8_t*    sourceBuffer,
+                               const uint16_t&   sourceBufferLen,
+                               const uint64_t*   attributeBuffer,
+                               const uint64_t&   attributeBufferLen,
+                               const ByteBuffer& pinMaterial);
 #endif
-
-        /**
-        * Marks a key Id to track that it is used for wrapping another key
-        * @param keyId      The key Id from provider
-        */
-        void markAsWrappingKey(const uint32_t& keyId);
-
-        /**
-        * Checks if the key Id passed is marked as wrapping key
-        * @param keyId  The key Id from provider
-        * @return       True if keyId is marked as a wrapping keyId, False otherwise
-        */
-        bool checkWrappingStatus(const uint32_t& keyId);
 
         /**
          * Clears all the keys.
@@ -481,6 +457,17 @@ namespace CryptoSgx
          */
         void clearState(const uint32_t& keyId);
 
+        SgxStatus updateKeyFile(const uint32_t&   keyId,
+                                const uint64_t*   attributeBuffer,
+                                const uint64_t&   attributeBufferLen,
+                                const ByteBuffer& pinMaterial);
+
+        SgxStatus updateHandle(uint32_t keyHandle, uint32_t newKeyHandle);
+
+        SgxStatus setWrappingStatus(const uint32_t& keyId);
+
+        bool checkWrappingStatus(const uint32_t& keyId);
+
     private:
 
         void fillCryptInitParams(CryptParams*           cryptParams,
@@ -504,12 +491,6 @@ namespace CryptoSgx
                           const uint32_t&   destBufferLen,
                           uint32_t*         destBufferWritten,
                           SgxCryptStatus*   status);
-
-        bool exportPlatformBoundKey(const SymmetricKey& symKey,
-                                    uint8_t*            destBuffer,
-                                    const uint32_t&     destBufferLen,
-                                    uint32_t*           destBufferWritten,
-                                    SgxCryptStatus*     status);
 
         SymmetricKeyCache   mSymmetricKeyCache;
         EVPCtxStateCache    mEVPCtxStateCache;

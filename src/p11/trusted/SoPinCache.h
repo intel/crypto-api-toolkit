@@ -29,72 +29,43 @@
  *
  */
 
-#ifndef OBJECT_CACHE
-#define OBJECT_CACHE
+#ifndef ENCLAVE_SO_PIN_CACHE_H
+#define ENCLAVE_SO_PIN_CACHE_H
 
 #include <map>
-#include <set>
-#include <mutex>
-#include <memory>
-#include <vector>
-#include <algorithm>
 
-#include "CryptoEnclaveDefs.h"
-#include "Constants.h"
-#include "p11Defines.h"
+#include "ByteBuffer.h"
 
-namespace P11Crypto
+namespace CryptoSgx
 {
-    class ObjectCache
+    /**
+     * Class used to store hashed salted so pin in a cache.
+     */
+    class SoPinCache
     {
     public:
+    
+        bool find(const uint64_t slotId) const;
 
-        ObjectCache();
+        ByteBuffer get(const uint64_t slotId) const;
 
-        ObjectCache(const ObjectCache&) = delete;
+        void add(const uint64_t slotId, const ByteBuffer& hashedSaltedPin);
 
-        ObjectCache& operator=(const ObjectCache&) = delete;
+        bool remove(const uint64_t slotId);
 
-        virtual ~ObjectCache();
-
-        /**
-        * Adds a session handle into the cache.
-        * @param sessionHandle          The session handle from the application.
-        * @param sessionParameters      The associated session parameters.
-        */
-        void add(const uint32_t& objectHandle, const ObjectParameters& objectParams);
-
-        /**
-        * Removes a session handle from the cache.
-        * @param    sessionHandle  The session handle.
-        */
-        void remove(const uint32_t& objectHandle);
-
-        /**
-        * Clears all the session handles from the cache.
-        */
         void clear();
 
-        bool getObjectParams(const uint32_t& objectHandle, ObjectParameters* objectParams);
-
-        CK_KEY_TYPE getKeyType(const uint32_t& keyHandle);
-
-        bool privateObject(const uint32_t& objectHandle);
-
-        bool tokenObject(const uint32_t& objectHandle);
-
-        bool attributeSet(const uint32_t& objectHandle, const BoolAttribute& boolAttribute);
-
-        bool updateKeyHandle(const uint32_t& objectHandle, const uint32_t& newKeyHandle);
+        uint32_t count() const;
 
     private:
 
-        using ObjectHandleCollection = std::map<uint32_t, ObjectParameters>;
+        typedef std::map<const uint64_t, ByteBuffer> PinCollection;
 
         // Member variables
-        ObjectHandleCollection mCache;
-        static std::mutex mCacheMutex;
+        PinCollection mCache;
     };
-} //P11Crypto
-#endif // OBJECT_HANDLE_CACHE
+
+} //CryptoSgx
+
+#endif //ENCLAVE_SO_PIN_CACHE_H
 

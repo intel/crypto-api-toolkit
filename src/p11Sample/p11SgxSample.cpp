@@ -165,17 +165,9 @@ bool rsaWrapUnwrapTests(CK_MECHANISM_TYPE   mechanismType,
                         CK_OBJECT_HANDLE    hAsymPrivateKey,
                         std::string&          errorMessage);
 
-bool aesPBINDTests(CK_MECHANISM_TYPE    mechanismType,
-                   CK_SESSION_HANDLE    hSession,
-                   CK_OBJECT_HANDLE     hKey,
-                   std::string&         errorMessage);
-
-bool rsaPBINDTests(CK_MECHANISM_TYPE    mechanismType,
-                   CK_SESSION_HANDLE    hSession,
-                   CK_OBJECT_HANDLE     hKey,
-                   std::string&         errorMessage);
-
 bool findObjects(CK_SESSION_HANDLE hSession, std::string& errorMessage);
+
+bool eccSignVerifyTests(std::string curveName, CK_SESSION_HANDLE hSession, std::string& errorMessage);
 
 #ifdef DCAP_SUPPORT
 bool customQuoteEcdsa(CK_MECHANISM_TYPE     mechanismType,
@@ -900,8 +892,22 @@ int main()
         exitApp(errorMessage);
     }
 
-    std::cout << "Executing encryption/decryption with RSA" << std::endl;
+    std::cout << "Executing encryption/decryption with RSA PKCS1 padding" << std::endl;
     result = rsaEncryptTests(CKM_RSA_PKCS, hSession, hAsymKey, hAsymPrivateKey, errorMessage);
+    if (!result)
+    {
+        cleanUp(p11,
+                p11ProviderHandle,
+                hSession,
+                hKey,
+                hKeyData,
+                hAsymKey,
+                hAsymPrivateKey);
+        exitApp(errorMessage);
+    }
+
+    std::cout << "Executing encryption/decryption with RSA OAEP padding" << std::endl;
+    result = rsaEncryptTests(CKM_RSA_PKCS_OAEP, hSession, hAsymKey, hAsymPrivateKey, errorMessage);
     if (!result)
     {
         cleanUp(p11,
@@ -999,7 +1005,7 @@ int main()
         exitApp(errorMessage);
     }
 
-    std::cout << "Executing wrap/unwrap with RSA" << std::endl;
+    std::cout << "Executing wrap/unwrap with RSA PKCS1 padding" << std::endl;
     result = rsaWrapUnwrapTests(CKM_RSA_PKCS, hSession, hKey, hAsymKey, hAsymPrivateKey, errorMessage);
     if (!result)
     {
@@ -1013,22 +1019,8 @@ int main()
         exitApp(errorMessage);
     }
 
-    std::cout << "Platform binding/sealing an AES key" << std::endl;
-    result = aesPBINDTests(CKM_AES_PBIND, hSession, hKey, errorMessage);
-    if (!result)
-    {
-        cleanUp(p11,
-                p11ProviderHandle,
-                hSession,
-                hKey,
-                hKeyData,
-                hAsymKey,
-                hAsymPrivateKey);
-        exitApp(errorMessage);
-    }
-
-    std::cout << "Platform binding/sealing an RSA key" << std::endl;
-    result = rsaPBINDTests(CKM_RSA_PBIND_EXPORT, hSession, hAsymKey, errorMessage);
+    std::cout << "Executing wrap/unwrap with RSA OAEP padding" << std::endl;
+    result = rsaWrapUnwrapTests(CKM_RSA_PKCS_OAEP, hSession, hKey, hAsymKey, hAsymPrivateKey, errorMessage);
     if (!result)
     {
         cleanUp(p11,
@@ -1087,6 +1079,48 @@ int main()
 
     std::cout << "Retrieving Quote+Public key - EPID" << std::endl;
     result = customQuote(CKM_EXPORT_EPID_QUOTE_RSA_PUBLIC_KEY, hSession, hAsymKey, errorMessage);
+    if (!result)
+    {
+        cleanUp(p11,
+                p11ProviderHandle,
+                hSession,
+                hKey,
+                hKeyData,
+                hAsymKey,
+                hAsymPrivateKey);
+        exitApp(errorMessage);
+    }
+
+    std::cout << "Executing sign/verify with EC - p256" << std::endl;
+    result = eccSignVerifyTests("p256", hSession, errorMessage);
+    if (!result)
+    {
+        cleanUp(p11,
+                p11ProviderHandle,
+                hSession,
+                hKey,
+                hKeyData,
+                hAsymKey,
+                hAsymPrivateKey);
+        exitApp(errorMessage);
+    }
+
+    std::cout << "Executing sign/verify with EC - p384" << std::endl;
+    result = eccSignVerifyTests("p384", hSession, errorMessage);
+    if (!result)
+    {
+        cleanUp(p11,
+                p11ProviderHandle,
+                hSession,
+                hKey,
+                hKeyData,
+                hAsymKey,
+                hAsymPrivateKey);
+        exitApp(errorMessage);
+    }
+
+	std::cout << "Executing sign/verify with EC EDWARDS- ed25519" << std::endl;
+    result = eccSignVerifyTests("ed25519", hSession, errorMessage);
     if (!result)
     {
         cleanUp(p11,
@@ -2261,165 +2295,6 @@ bool destroyKey(CK_SESSION_HANDLE hSession,
     return result;
 }
 
-bool aesPBINDTests(CK_MECHANISM_TYPE    mechanismType,
-                   CK_SESSION_HANDLE    hSession,
-                   CK_OBJECT_HANDLE     hKey,
-                   std::string&         errorMessage)
-{
-    CK_RV                   p11Status       = CKR_GENERAL_ERROR;
-    CK_MECHANISM            mechanism       = { mechanismType, NULL_PTR, 0 };
-    CK_OBJECT_HANDLE        hUnwrappedKey   = CK_INVALID_HANDLE;
-    CK_BBOOL                bTrue           = CK_TRUE;
-    CK_ULONG                wrappedLen      = 0UL;
-    bool                    result          = false;
-    CK_KEY_TYPE             aesKeyType      = CKK_AES;
-    CK_OBJECT_CLASS         aesKeyClass     = CKO_SECRET_KEY;
-    CK_UTF8CHAR             aesKeyLabel[]   = "AES Key Label For PBIND";
-    std::vector<CK_BYTE>    wrappedData;
-    CK_ATTRIBUTE            keyAttribs[]    = { { CKA_ENCRYPT,     &bTrue, sizeof(bTrue) },
-                                                { CKA_DECRYPT,     &bTrue, sizeof(bTrue) },
-                                                { CKA_WRAP,        &bTrue, sizeof(bTrue) },
-                                                { CKA_UNWRAP,      &bTrue, sizeof(bTrue) },
-                                                { CKA_KEY_TYPE,      &aesKeyType,  sizeof(aesKeyType)   },
-                                                { CKA_CLASS,         &aesKeyClass, sizeof(aesKeyClass)  },
-                                                { CKA_LABEL,         aesKeyLabel,  sizeof(aesKeyLabel)-1 } };
-    do
-    {
-        p11Status = p11->C_WrapKey(hSession,
-                                   &mechanism,
-                                   NULL_PTR,
-                                   hKey,
-                                   NULL_PTR,
-                                   &wrappedLen);
-        if (CKR_OK != p11Status)
-        {
-            errorMessage.append("FAILED : C_WrapKeyPBIND!");
-            break;
-        }
-
-        wrappedData.resize(wrappedLen);
-        p11Status = p11->C_WrapKey(hSession,
-                                   &mechanism,
-                                   NULL_PTR,
-                                   hKey,
-                                   wrappedData.data(),
-                                   &wrappedLen);
-        if (CKR_OK != p11Status)
-        {
-            errorMessage.append("FAILED : C_WrapKeyPBIND!");
-            break;
-        }
-
-        p11Status = p11->C_UnwrapKey(hSession,
-                                     &mechanism,
-                                     NULL_PTR,
-                                     wrappedData.data(),
-                                     wrappedLen,
-                                     keyAttribs,
-                                     sizeof(keyAttribs) / sizeof(CK_ATTRIBUTE),
-                                     &hUnwrappedKey);
-        if (CKR_OK != p11Status)
-        {
-            errorMessage.append("FAILED : C_UnwrapKey!");
-            break;
-        }
-
-        result = destroyKey(hSession, hUnwrappedKey, errorMessage);
-
-    } while (false);
-
-    return result;
-}
-
-bool rsaPBINDTests(CK_MECHANISM_TYPE    mechanismType,
-                   CK_SESSION_HANDLE    hSession,
-                   CK_OBJECT_HANDLE     hKey,
-                   std::string&         errorMessage)
-{
-    CK_RV                   p11Status            = CKR_GENERAL_ERROR;
-    CK_MECHANISM            mechanism            = { mechanismType, NULL_PTR, 0 };
-    CK_BBOOL                bTrue                = CK_TRUE;
-    CK_OBJECT_HANDLE        hPublicKey           = CK_INVALID_HANDLE;
-    CK_OBJECT_HANDLE        hPrivateKey          = CK_INVALID_HANDLE;
-    CK_ULONG                wrappedLen           = 0UL;
-    bool                    result               = false;
-    CK_KEY_TYPE             rsaKeyType           = CKK_RSA;
-    CK_OBJECT_CLASS         rsaPublicKeyClass    = CKO_PUBLIC_KEY;
-    CK_OBJECT_CLASS         rsaPrivateKeyClass   = CKO_PRIVATE_KEY;
-    CK_UTF8CHAR             rsaPublicKeyLabel[]  = "RSA Public Key Label";
-    CK_UTF8CHAR             rsaPrivateKeyLabel[] = "RSA Private Key Label";
-    std::vector<CK_BYTE>    wrappedData;
-
-    do
-    {
-        p11Status = p11->C_WrapKey(hSession,
-                                   &mechanism,
-                                   NULL_PTR,
-                                   hKey,
-                                   NULL_PTR,
-                                   &wrappedLen);
-        if (CKR_OK != p11Status)
-        {
-            errorMessage.append("FAILED : C_WrapKeyPBIND!");
-            break;
-        }
-        wrappedData.resize(wrappedLen);
-        p11Status = p11->C_WrapKey(hSession,
-                                   &mechanism,
-                                   NULL_PTR,
-                                   hKey,
-                                   wrappedData.data(),
-                                   &wrappedLen);
-        if (CKR_OK != p11Status)
-        {
-            errorMessage.append("FAILED : C_WrapKeyPBIND!");
-            break;
-        }
-
-        mechanism       = { CKM_RSA_PBIND_IMPORT, NULL_PTR, 0 };
-
-        CK_RSA_PBIND_IMPORT_PARAMS  rsaPbindImportParams = { wrappedData.data(), wrappedLen };
-        CK_MECHANISM_PTR            pMechanism((CK_MECHANISM_PTR)&mechanism);
-
-        pMechanism->pParameter      = &rsaPbindImportParams;
-        pMechanism->ulParameterLen  = sizeof(rsaPbindImportParams);
-
-        CK_ATTRIBUTE asymPublicKeyAttribs[] = {{ CKA_ENCRYPT,   &bTrue, sizeof(bTrue) },
-                                               { CKA_VERIFY,    &bTrue, sizeof(bTrue) },
-                                               { CKA_WRAP,      &bTrue, sizeof(bTrue) },
-                                               { CKA_KEY_TYPE,  &rsaKeyType,        sizeof(rsaKeyType)   },
-                                               { CKA_CLASS,     &rsaPublicKeyClass, sizeof(rsaPublicKeyClass)  },
-                                               { CKA_LABEL,     rsaPublicKeyLabel,  sizeof(rsaPublicKeyLabel)-1 }};
-
-        CK_ATTRIBUTE asymPrivateKeyAttribs[] = {{ CKA_DECRYPT,  &bTrue, sizeof(bTrue) },
-                                                { CKA_SIGN,     &bTrue, sizeof(bTrue) },
-                                                { CKA_UNWRAP,   &bTrue, sizeof(bTrue) },
-                                                { CKA_KEY_TYPE, &rsaKeyType,         sizeof(rsaKeyType)   },
-                                                { CKA_CLASS,    &rsaPrivateKeyClass, sizeof(rsaPrivateKeyClass)  },
-                                                { CKA_LABEL,    rsaPrivateKeyLabel,  sizeof(rsaPrivateKeyLabel)-1 }};
-
-        p11Status = p11->C_GenerateKeyPair(hSession,
-                                           pMechanism,
-                                           asymPublicKeyAttribs,
-                                           sizeof(asymPublicKeyAttribs) / sizeof(CK_ATTRIBUTE),
-                                           asymPrivateKeyAttribs,
-                                           sizeof(asymPrivateKeyAttribs) / sizeof(CK_ATTRIBUTE),
-                                           &hPublicKey,
-                                           &hPrivateKey);
-        if (CKR_OK != p11Status)
-        {
-            errorMessage.append("FAILED : C_GenerateKeyPair!");
-            break;
-        }
-
-        result = destroyKey(hSession, hPublicKey, errorMessage);
-        result = destroyKey(hSession, hPrivateKey, errorMessage);
-
-    } while (false);
-
-    return result;
-}
-
 #ifdef IMPORT_RAW_KEY
 bool aesGenerateKeyFromBuffer(CK_SESSION_HANDLE    hSession,
                               std::string&         errorMessage)
@@ -2847,3 +2722,166 @@ bool findObjects(CK_SESSION_HANDLE hSession, std::string& errorMessage)
     return result;
 }
 
+bool eccSignVerifyTests(std::string curveName, CK_SESSION_HANDLE hSession, std::string& errorMessage)
+{
+    bool             result       = false;
+    CK_OBJECT_HANDLE ecPublicKey  = CK_INVALID_HANDLE;
+    CK_OBJECT_HANDLE ecPrivateKey = CK_INVALID_HANDLE;
+    CK_MECHANISM     signVerifyMechanism;
+
+    do
+    {
+        CK_KEY_TYPE       keyType           = ("ed25519" == curveName) ? CKK_EC_EDWARDS : CKK_EC;
+        CK_MECHANISM_TYPE mechanismType     = ("ed25519" == curveName) ? CKM_EC_EDWARDS_KEY_PAIR_GEN : CKM_EC_KEY_PAIR_GEN;
+        CK_OBJECT_CLASS   ecPublicKeyClass  = CKO_PUBLIC_KEY;
+        CK_OBJECT_CLASS   ecPrivateKeyClass = CKO_PRIVATE_KEY;
+
+        CK_UTF8CHAR     ecPublicKeyLabel[]  = "RSA Public Key Label";
+        CK_UTF8CHAR     ecPrivateKeyLabel[] = "RSA Private Key Label";
+
+        CK_BBOOL        bTrue = CK_TRUE;
+
+        CK_UTF8CHAR     id[] = "1";
+
+        CK_BYTE oidP256[]  = { 0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07 };
+	    CK_BYTE oidP384[]  = { 0x06, 0x05, 0x2B, 0x81, 0x04, 0x00, 0x22 };
+	    CK_BYTE oid25519[] = { 0x06, 0x03, 0x2B, 0x65, 0x70 };
+
+        CK_ATTRIBUTE publicKeyAttribs[] = {{ CKA_EC_PARAMS,       NULL,               0 },
+                                           { CKA_TOKEN,           &bTrue,             sizeof(bTrue) },
+                                           { CKA_VERIFY,          &bTrue,             sizeof(bTrue) },
+                                           { CKA_KEY_TYPE,        &keyType,           sizeof(keyType)   },
+                                           { CKA_CLASS,           &ecPublicKeyClass,  sizeof(ecPublicKeyClass)  },
+                                           { CKA_LABEL,           ecPublicKeyLabel,   sizeof(ecPublicKeyLabel)-1 },
+                                           { CKA_ID,              &id[0],             sizeof(id) }
+                                           };
+
+        CK_ATTRIBUTE privateKeyAttribs[] = {{ CKA_TOKEN,    &bTrue,              sizeof(bTrue) },
+                                            { CKA_SIGN,     &bTrue,              sizeof(bTrue) },
+                                            { CKA_KEY_TYPE, &keyType,            sizeof(keyType)   },
+                                            { CKA_CLASS,    &ecPrivateKeyClass,  sizeof(ecPrivateKeyClass)  },
+                                            { CKA_LABEL,    ecPrivateKeyLabel,   sizeof(ecPrivateKeyLabel)-1 },
+                                            { CKA_ID,       &id[0],              sizeof(id) }
+                                            };
+
+        if (strcmp(curveName.c_str(), "p256") == 0)
+        {
+            signVerifyMechanism = { CKM_ECDSA, NULL_PTR, 0 };
+
+            publicKeyAttribs[0].pValue = oidP256;
+            publicKeyAttribs[0].ulValueLen = sizeof(oidP256);
+        }
+        else if (strcmp(curveName.c_str(), "p384") == 0)
+        {
+            signVerifyMechanism = { CKM_ECDSA, NULL_PTR, 0 };
+
+            publicKeyAttribs[0].pValue = oidP384;
+            publicKeyAttribs[0].ulValueLen = sizeof(oidP384);
+        }
+        else if (strcmp(curveName.c_str(), "ed25519") == 0)
+        {
+            signVerifyMechanism = { CKM_EDDSA, NULL_PTR, 0 };
+
+            publicKeyAttribs[0].pValue = oid25519;
+            publicKeyAttribs[0].ulValueLen = sizeof(oid25519);
+        }
+        else
+        {
+            errorMessage.append("Unsupported EC/ED curve name!");
+            break;
+        }
+
+        CK_MECHANISM mechanism = { mechanismType, NULL_PTR, 0 };
+        CK_RV p11Status = p11->C_GenerateKeyPair(hSession,
+                                                 &mechanism,
+                                                 publicKeyAttribs,
+                                                 sizeof(publicKeyAttribs) / sizeof(CK_ATTRIBUTE),
+                                                 privateKeyAttribs,
+                                                 sizeof(privateKeyAttribs) / sizeof(CK_ATTRIBUTE),
+                                                 &ecPublicKey,
+                                                 &ecPrivateKey);
+        if (CKR_OK != p11Status)
+        {
+            errorMessage.append("FAILED : To GenerateKeyPair (EC) !");
+            p11->C_DestroyObject(hSession, ecPublicKey);
+            p11->C_DestroyObject(hSession, ecPrivateKey);
+            break;
+        }
+
+        CK_ULONG             bytesDone    = 0;
+        std::vector<CK_BYTE> signature;
+        std::vector<CK_BYTE> sourceBuffer(40, 1);
+        CK_MECHANISM_PTR     pMechanism((CK_MECHANISM_PTR)&signVerifyMechanism);
+
+        p11Status = p11->C_SignInit(hSession, pMechanism, ecPrivateKey);
+        if (CKR_OK != p11Status)
+        {
+            errorMessage.append("FAILED : C_SignInit!");
+            break;
+        }
+
+        p11Status = p11->C_Sign(hSession, sourceBuffer.data(), sourceBuffer.size(), NULL_PTR, &bytesDone);
+        if (CKR_OK != p11Status)
+        {
+            errorMessage.append("FAILED : C_Sign!");
+            break;
+        }
+
+        signature.resize(bytesDone);
+        p11Status = p11->C_Sign(hSession, sourceBuffer.data(), sourceBuffer.size(), signature.data(), &bytesDone);
+        if (CKR_OK != p11Status)
+        {
+            errorMessage.append("FAILED : C_Sign!");
+            break;
+        }
+
+        if ((strcmp(curveName.c_str(), "p256") == 0) ||
+            (strcmp(curveName.c_str(), "p384") == 0))
+        {
+#ifdef EC_VERIFY
+            p11Status = p11->C_VerifyInit(hSession, pMechanism, ecPublicKey);
+            if (CKR_OK != p11Status)
+            {
+                errorMessage.append("FAILED : C_VerifyInit!");
+                break;
+            }
+
+            p11Status = p11->C_Verify(hSession, sourceBuffer.data(), sourceBuffer.size(), signature.data(), signature.size());
+            if (CKR_OK != p11Status)
+            {
+                errorMessage.append("FAILED : C_Verify!");
+                break;
+            }
+#else
+            std::cout <<"EC_VERIFY support not enabled, skipping signature verification.\n";
+#endif
+        }
+        else if (strcmp(curveName.c_str(), "ed25519") == 0)
+        {
+#ifdef ED_VERIFY
+            p11Status = p11->C_VerifyInit(hSession, pMechanism, ecPublicKey);
+            if (CKR_OK != p11Status)
+            {
+                errorMessage.append("FAILED : C_VerifyInit!");
+                break;
+            }
+
+            p11Status = p11->C_Verify(hSession, sourceBuffer.data(), sourceBuffer.size(), signature.data(), signature.size());
+            if (CKR_OK != p11Status)
+            {
+                errorMessage.append("FAILED : C_Verify!");
+                break;
+            }
+#else
+            std::cout <<"ED_VERIFY support not enabled, skipping signature verification.\n";
+#endif
+        }
+
+        result = true;
+    } while(false);
+
+    C_DestroyObject(hSession, ecPublicKey);
+    C_DestroyObject(hSession, ecPrivateKey);
+
+    return result;
+}

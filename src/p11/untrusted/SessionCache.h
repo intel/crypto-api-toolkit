@@ -168,8 +168,16 @@ namespace P11Crypto
         bool logout(const CK_SLOT_ID& slotId);
 
         bool sessionExists(const CK_SLOT_ID& slotId) const;
-        
+
         void updateSessionStateForLogin(const CK_SLOT_ID& slotId, const CK_USER_TYPE& userType);
+
+        void updateTokenObjectStatus(const CK_SLOT_ID& slotId);
+
+        bool tokenObjectsLoaded(const CK_SLOT_ID& slotId);
+
+        bool setWrappingStatus(const uint32_t& objectHandle);
+
+        bool checkWrappingStatus(const uint32_t& objectHandle);
 
     private:
 
@@ -195,7 +203,13 @@ namespace P11Crypto
             bool userLoggedIn = false;
         };
 
-        using SlotIdCollection = std::map<CK_SLOT_ID, LoginStatus>;
+        struct SlotParameters
+        {
+            LoginStatus loginStatus;
+            bool        tokenObjectsLoaded = false;
+        };
+
+        using SlotIdCollection = std::map<CK_SLOT_ID, SlotParameters>;
         SlotIdCollection mSlotCache{};
     };
 } //P11Crypto

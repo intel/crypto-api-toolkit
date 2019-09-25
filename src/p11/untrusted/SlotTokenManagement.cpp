@@ -274,6 +274,11 @@ CK_RV getMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_MECHANISM_I
                 pInfo->ulMaxKeySize = static_cast<CK_ULONG>(AsymmetricKeySize::keyLength4096);
                 pInfo->flags        = CKF_HW | CKF_ENCRYPT | CKF_DECRYPT | CKF_SIGN | CKF_VERIFY | CKF_WRAP | CKF_UNWRAP;
                 break;
+            case CKM_RSA_PKCS_OAEP:
+                pInfo->ulMinKeySize = static_cast<CK_ULONG>(AsymmetricKeySize::keyLength1024);
+                pInfo->ulMaxKeySize = static_cast<CK_ULONG>(AsymmetricKeySize::keyLength4096);
+                pInfo->flags        = CKF_HW | CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP;
+                break;
             case CKM_RSA_PKCS_PSS:
             case CKM_SHA256_RSA_PKCS:
             case CKM_SHA512_RSA_PKCS:
@@ -295,21 +300,6 @@ CK_RV getMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_MECHANISM_I
                 pInfo->ulMaxKeySize = maxAesKeySizeForHmacImport;
                 pInfo->flags        = CKF_HW | CKF_DIGEST;
                 break;
-            case CKM_AES_PBIND:
-                pInfo->ulMinKeySize = static_cast<CK_ULONG>(SymmetricKeySize::keyLength128);
-                pInfo->ulMaxKeySize = static_cast<CK_ULONG>(SymmetricKeySize::keyLength256);
-                pInfo->flags        = CKF_HW | CKF_WRAP | CKF_UNWRAP;
-                break;
-            case CKM_RSA_PBIND_EXPORT:
-                pInfo->ulMinKeySize = static_cast<CK_ULONG>(AsymmetricKeySize::keyLength1024);
-                pInfo->ulMaxKeySize = static_cast<CK_ULONG>(AsymmetricKeySize::keyLength4096);
-                pInfo->flags        = CKF_HW | CKF_WRAP;
-                break;
-            case CKM_RSA_PBIND_IMPORT:
-                pInfo->ulMinKeySize = static_cast<CK_ULONG>(AsymmetricKeySize::keyLength1024);
-                pInfo->ulMaxKeySize = static_cast<CK_ULONG>(AsymmetricKeySize::keyLength4096);
-                pInfo->flags        = CKF_HW | CKF_GENERATE_KEY_PAIR;
-                break;
             case CKM_EXPORT_RSA_PUBLIC_KEY:
                 pInfo->ulMinKeySize = static_cast<CK_ULONG>(AsymmetricKeySize::keyLength1024);
                 pInfo->ulMaxKeySize = static_cast<CK_ULONG>(AsymmetricKeySize::keyLength4096);
@@ -325,6 +315,26 @@ CK_RV getMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_MECHANISM_I
                 pInfo->ulMinKeySize = static_cast<CK_ULONG>(AsymmetricKeySize::keyLength1024);
                 pInfo->ulMaxKeySize = static_cast<CK_ULONG>(AsymmetricKeySize::keyLength4096);
                 pInfo->flags        = CKF_HW | CKF_WRAP | CKF_UNWRAP;
+                break;
+            case CKM_EC_KEY_PAIR_GEN:
+                pInfo->ulMinKeySize = minEcKeyLen;
+                pInfo->ulMaxKeySize = maxEcKeyLen;
+                pInfo->flags        = CKF_HW | CKF_GENERATE_KEY_PAIR;
+                break;
+            case CKM_EC_EDWARDS_KEY_PAIR_GEN:
+                pInfo->ulMinKeySize = ed25519KeyLength;
+                pInfo->ulMaxKeySize = ed25519KeyLength;
+                pInfo->flags        = CKF_HW | CKF_GENERATE_KEY_PAIR;
+                break;
+            case CKM_ECDSA:
+                pInfo->ulMinKeySize = minEcKeyLen;
+                pInfo->ulMaxKeySize = maxEcKeyLen;
+                pInfo->flags        = CKF_HW | CKF_SIGN | CKF_VERIFY;
+                break;
+            case CKM_EDDSA:
+                pInfo->ulMinKeySize = ed25519KeyLength;
+                pInfo->ulMaxKeySize = ed25519KeyLength;
+                pInfo->flags        = CKF_HW | CKF_SIGN | CKF_VERIFY;
                 break;
             default:
                 return CKR_MECHANISM_INVALID;
@@ -451,6 +461,54 @@ CK_RV initPIN(CK_SESSION_HANDLE hSession, CK_UTF8CHAR_PTR pPin, CK_ULONG ulPinLe
 }
 
 //---------------------------------------------------------------------------------------------
+static CK_RV updateTokenObjectFiles(const CK_SLOT_ID& slotID)
+{
+    CK_RV rv = CKR_OK;
+
+    do
+    {
+        std::string tokenFolderPath = tokenPath + "/" + "slot" + std::to_string(slotID) + "/.tokenObjects";
+
+        DIR*        dir = nullptr;
+        std::string fileName, tokenObjectFilePath;
+
+        dir = opendir(tokenFolderPath.c_str());
+        if (!dir)
+        {
+            rv = CKR_GENERAL_ERROR;
+            break;
+        }
+
+        struct dirent* entry = nullptr;
+
+        while (entry = readdir(dir))
+        {
+            if (!std::strcmp(entry->d_name, ".") ||
+                !std::strcmp(entry->d_name, ".."))
+            {
+                continue;
+            }
+
+            fileName.clear();
+            fileName = entry->d_name;
+
+            tokenObjectFilePath.clear();
+            tokenObjectFilePath = tokenFolderPath + "/" + fileName;
+
+            rv = Utils::EnclaveUtils::updateSOPinMaterialInFile(slotID, tokenObjectFilePath);
+            if (CKR_OK != rv)
+            {
+                break;
+            }
+        }
+
+        closedir(dir);
+    } while(false);
+
+    return rv;
+}
+
+//---------------------------------------------------------------------------------------------
 CK_RV setPIN(CK_SESSION_HANDLE  hSession,
              CK_UTF8CHAR_PTR    pOldPin,
              CK_ULONG           ulOldLen,
@@ -527,6 +585,32 @@ CK_RV setPIN(CK_SESSION_HANDLE  hSession,
         rv = token->setPin(pOldPin, ulOldLen,
                            pNewPin, ulNewLen,
                            userType);
+        if (CKR_OK != rv)
+        {
+            break;
+        }
+
+        if (CKU_SO == userType)
+        {
+            // Extract SO pin material from token file.
+            std::string soPinMaterial = token->getSOPinMaterial();
+            if (soPinMaterial.empty())
+            {
+                rv = CKR_GENERAL_ERROR;
+                break;
+            }
+
+            // Update new so pin material in enclave cache.
+            rv = Utils::EnclaveUtils::saveSoPinMaterial(slotID, soPinMaterial);
+            if (CKR_OK != rv)
+            {
+                break;
+            }
+
+            // Update new pin to all token object files.
+            rv = updateTokenObjectFiles(slotID);
+        }
+
     } while(false);
 
     return rv;

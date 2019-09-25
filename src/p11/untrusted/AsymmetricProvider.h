@@ -52,21 +52,11 @@ namespace P11Crypto
         * @param    phPrivateKey     The key handle for private key.
         * @return   CK_RV            CKR_OK if operation is successful, error code otherwise.
         */
-        CK_RV generateRsaKeyPair(const AsymmetricKeyParams& asymKeyParams,
-                                 CK_OBJECT_HANDLE_PTR       phPublicKey,
-                                 CK_OBJECT_HANDLE_PTR       phPrivateKey);
-
-        //---------------------------------------------------------------------------------------------
-        /**
-        * Imports a platform bound asymmetric key.
-        * @param    platformBoundKey The platform bound asymmetric key buffer.
-        * @param    phPublicKey      The key handle for public key.
-        * @param    phPrivateKey     The key handle for private key.
-        * @return   CK_RV            CKR_OK if operation is successful, error code otherwise.
-        */
-        CK_RV importRsaPlatformBoundKey(const std::vector<uint8_t>& platformBoundKey,
-                                        CK_OBJECT_HANDLE_PTR        phPublicKey,
-                                        CK_OBJECT_HANDLE_PTR        phPrivateKey);
+        CK_RV generateRsaKeyPair(const AsymmetricKeyParams&   asymKeyParams,
+                                 const std::vector<CK_ULONG>& packedAttributesPublic,
+                                 const std::vector<CK_ULONG>& packedAttributesPrivate,
+                                 CK_OBJECT_HANDLE_PTR         phPublicKey,
+                                 CK_OBJECT_HANDLE_PTR         phPrivateKey);
 
         //---------------------------------------------------------------------------------------------
         /**
@@ -79,12 +69,13 @@ namespace P11Crypto
         * @param    destBufferRequiredLength   The length of destination buffer that will be required to hold encrypted output.
         * @return   CK_RV                      CKR_OK if operation is successful, error code otherwise.
         */
-        CK_RV encrypt(const uint32_t& keyHandle,
-                      const uint8_t*  sourceBuffer,
-                      const uint32_t& sourceBufferLen,
-                      uint8_t*        destBuffer,
-                      const uint32_t& destBufferLen,
-                      uint32_t*       destBufferRequiredLength);
+        CK_RV encrypt(const uint32_t&   keyHandle,
+                      const uint8_t*    sourceBuffer,
+                      const uint32_t&   sourceBufferLen,
+                      uint8_t*          destBuffer,
+                      const uint32_t&   destBufferLen,
+                      uint32_t*         destBufferRequiredLength,
+                      const RsaPadding& rsaPadding);
 
         //---------------------------------------------------------------------------------------------
         // /**
@@ -97,12 +88,13 @@ namespace P11Crypto
         // * @param    destBufferRequiredLength   The length of destination buffer that will be required to hold decrypted output.
         // * @return   CK_RV                      CKR_OK if operation is successful, error code otherwise.
         // */
-        CK_RV decrypt(const uint32_t& keyHandle,
-                      const uint8_t*  encryptedBuffer,
-                      const uint32_t& encryptedBufferLen,
-                      uint8_t*        destBuffer,
-                      const uint32_t& destBufferLen,
-                      uint32_t*       destBufferRequiredLength);
+        CK_RV decrypt(const uint32_t&   keyHandle,
+                      const uint8_t*    encryptedBuffer,
+                      const uint32_t&   encryptedBufferLen,
+                      uint8_t*          destBuffer,
+                      const uint32_t&   destBufferLen,
+                      uint32_t*         destBufferRequiredLength,
+                      const RsaPadding& rsaPadding);
 
         //---------------------------------------------------------------------------------------------
         /**
@@ -121,20 +113,6 @@ namespace P11Crypto
                       uint8_t*              destBuffer,
                       const uint32_t&       destBufferLen,
                       uint32_t*             destBufferLenRequired);
-
-        //---------------------------------------------------------------------------------------------
-        /**
-        * Platform binds an asymmetric key.
-        * @param    keyHandle                  The key handle of key that is to be platform bound.
-        * @param    destBuffer                 The destination buffer where the platform bound key buffer goes into.
-        * @param    destBufferLen              The length of destination buffer.
-        * @param    destBufferLenRequired      The length of destination buffer that will be required to hold the platform bound key.
-        * @return   CK_RV                      CKR_OK if operation is successful, error code otherwise.
-        */
-        CK_RV platformbindKey(const uint32_t& keyHandle,
-                              uint8_t*        destBuffer,
-                              const uint32_t& destBufferLen,
-                              uint32_t*       destBufferLenRequired);
 
         //---------------------------------------------------------------------------------------------
         /**
@@ -161,7 +139,7 @@ namespace P11Crypto
         * @return   CK_RV                      CKR_OK if operation is successful, error code otherwise.
         */
         CK_RV exportQuoteWithRsaPublicKey(const uint32_t&       	keyHandle,
-                                      	  const RsaEpidQuoteParams& rsaQuoteWrapParams,
+                                          const RsaEpidQuoteParams& rsaQuoteWrapParams,
                                           uint8_t*              	destBuffer,
                                           const uint32_t&       	destBufferLen,
                                           uint32_t*             	destBufferLenRequired);
@@ -177,11 +155,11 @@ namespace P11Crypto
         * @param    destBufferLenRequired      The length of destination buffer that will be required to hold the quote + public key.
         * @return   CK_RV                      CKR_OK if operation is successful, error code otherwise.
         */
-        CK_RV exportQuoteWithRsaPublicKey(const uint32_t&       	    keyHandle,
-                                          const RsaEcdsaQuoteParams&    rsaQuoteWrapParams,
-                                       	  uint8_t*              	    destBuffer,
-                                          const uint32_t&       	    destBufferLen,
-                                          uint32_t*            		    destBufferLenRequired);
+        CK_RV exportQuoteWithRsaPublicKey(const uint32_t&       	 keyHandle,
+                                          const RsaEcdsaQuoteParams& rsaQuoteWrapParams,
+                                          uint8_t*              	 destBuffer,
+                                          const uint32_t&       	 destBufferLen,
+                                          uint32_t*            		 destBufferLenRequired);
 #endif
 
         /**
@@ -194,11 +172,12 @@ namespace P11Crypto
         * @return   CK_RV                   CKR_OK if operation is successful, error code otherwise.
         */
 
-        CK_RV unwrapKey(const uint32_t&       unwrappingKeyHandle,
-                        const uint8_t*        sourceBuffer,
-                        const uint32_t&       sourceBufferLen,
-                        const RsaCryptParams& rsaCryptParams,
-                        uint32_t*             keyHandle);
+        CK_RV unwrapKey(const uint32_t&              unwrappingKeyHandle,
+                        const uint8_t*               sourceBuffer,
+                        const uint32_t&              sourceBufferLen,
+                        const RsaCryptParams&        rsaCryptParams,
+                        const std::vector<CK_ULONG>& packedAttributes,
+                        uint32_t*                    keyHandle);
 
         //---------------------------------------------------------------------------------------------
         /**
@@ -208,9 +187,10 @@ namespace P11Crypto
         * @param    keyHandle           The key handle that points to the imported public key.
         * @return   CK_RV               CKR_OK if operation is successful, error code otherwise.
         */
-        CK_RV importKey(const uint8_t*  sourceBuffer,
-                        const uint32_t& sourceBufferLen,
-                        uint32_t*       keyHandle);
+        CK_RV importKey(const uint8_t*               sourceBuffer,
+                        const uint32_t&              sourceBufferLen,
+                        const std::vector<CK_ULONG>& packedAttributes,
+                        uint32_t*                    keyHandle);
 
         //---------------------------------------------------------------------------------------------
         /**
@@ -253,6 +233,13 @@ namespace P11Crypto
                      uint32_t          destBufferLen,
                      const RsaPadding& rsaPadding,
                      const HashMode&   hashMode);
+
+        //---------------------------------------------------------------------------------------------
+        CK_RV generateEcc(const AsymmetricKeyParams&   asymKeyParams,
+                          const std::vector<CK_ULONG>& packedAttributesPublic,
+                          const std::vector<CK_ULONG>& packedAttributesPrivate,
+                          CK_OBJECT_HANDLE_PTR         phPublicKey,
+                          CK_OBJECT_HANDLE_PTR         phPrivateKey);
     };
 }
 #endif //ASYMMETRIC_PROVIDER_H
