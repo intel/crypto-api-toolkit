@@ -1,19 +1,19 @@
 /*
- * Copyright (C) 2019 Intel Corporation. All rights reserved.
+ * Copyright (C) 2019-2020 Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
+ *   1. Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *   2. Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *   3. Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -43,13 +43,13 @@
 */
 CK_RV __attribute__((visibility("default"))) C_Initialize(CK_VOID_PTR pInitArgs)
 {
-    return initializeProvider(pInitArgs);
+    return initialize(pInitArgs);
 }
 
 //---------------------------------------------------------------------------------------------
 CK_RV __attribute__((visibility("default"))) C_Finalize(CK_VOID_PTR pReserved)
 {
-    return finalizeProvider(pReserved);
+    return finalize(pReserved);
 }
 
 //---------------------------------------------------------------------------------------------
@@ -241,7 +241,6 @@ CK_RV __attribute__((visibility("default"))) C_GenerateKeyPair(CK_SESSION_HANDLE
                                                                CK_OBJECT_HANDLE_PTR phPublicKey,
                                                                CK_OBJECT_HANDLE_PTR phPrivateKey)
 {
-
     return generateKeyPair(hSession, pMechanism,
                            pPublicKeyTemplate,  ulPublicKeyAttributeCount,
                            pPrivateKeyTemplate, ulPrivateKeyAttributeCount,
@@ -287,7 +286,7 @@ CK_RV __attribute__((visibility("default"))) C_WaitForSlotEvent(CK_FLAGS       f
                                                                 CK_SLOT_ID_PTR pSlot,
                                                                 CK_VOID_PTR    pReserved)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return waitForSlotEvent(flags, pSlot, pReserved);
 }
 
 //---------------------------------------------------------------------------------------------
@@ -367,7 +366,7 @@ CK_RV __attribute__((visibility("default"))) C_GetOperationState(CK_SESSION_HAND
                                                                  CK_BYTE_PTR       pOperationState,
                                                                  CK_ULONG_PTR      pulOperationStateLen)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return getOperationState(hSession, pOperationState, pulOperationStateLen);
 }
 
 //---------------------------------------------------------------------------------------------
@@ -377,7 +376,10 @@ CK_RV __attribute__((visibility("default"))) C_SetOperationState(CK_SESSION_HAND
                                                                  CK_OBJECT_HANDLE  hEncryptionKey,
                                                                  CK_OBJECT_HANDLE  hAuthenticationKey)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return setOperationState(hSession, pOperationState,
+                             ulOperationStateLen,
+                             hEncryptionKey,
+                             hAuthenticationKey);
 }
 
 //---------------------------------------------------------------------------------------------
@@ -411,13 +413,13 @@ CK_RV __attribute__((visibility("default"))) C_CopyObject(CK_SESSION_HANDLE    h
                                                           CK_ULONG             ulCount,
                                                           CK_OBJECT_HANDLE_PTR phNewObject)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return copyObject(hSession, hObject, pTemplate, ulCount, phNewObject);
 }
 
 //---------------------------------------------------------------------------------------------
 CK_RV __attribute__((visibility("default"))) C_GetObjectSize(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, CK_ULONG_PTR pulSize)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return getObjectSize(hSession, hObject, pulSize);
 }
 
 //---------------------------------------------------------------------------------------------
@@ -475,99 +477,99 @@ CK_RV __attribute__((visibility("default"))) C_GetFunctionStatus(CK_SESSION_HAND
 }
 
 //---------------------------------------------------------------------------------------------
-CK_RV __attribute__((visibility("default"))) C_DigestKey(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject)
+CK_RV __attribute__((visibility("default"))) C_DigestKey(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hKey)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return digestKey(hSession, hKey);
 }
 
 //---------------------------------------------------------------------------------------------
 CK_RV __attribute__((visibility("default"))) C_SignUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return signUpdate(hSession, pPart, ulPartLen);
 }
 
 //---------------------------------------------------------------------------------------------
 CK_RV __attribute__((visibility("default"))) C_SignFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return signFinal(hSession, pSignature, pulSignatureLen);
 }
 
 //---------------------------------------------------------------------------------------------
 CK_RV __attribute__((visibility("default"))) C_SignRecoverInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return signRecoverInit(hSession, pMechanism, hKey);
 }
 
 //---------------------------------------------------------------------------------------------
 CK_RV __attribute__((visibility("default"))) C_SignRecover(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return signRecover(hSession, pData, ulDataLen, pSignature, pulSignatureLen);
 }
 
 //---------------------------------------------------------------------------------------------
 CK_RV __attribute__((visibility("default"))) C_VerifyUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return verifyUpdate(hSession, pPart, ulPartLen);
 }
 
 //---------------------------------------------------------------------------------------------
 CK_RV __attribute__((visibility("default"))) C_VerifyFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, CK_ULONG ulSignatureLen)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return verifyFinal(hSession, pSignature, ulSignatureLen);
 }
 
 //---------------------------------------------------------------------------------------------
 CK_RV __attribute__((visibility("default"))) C_VerifyRecoverInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return verifyRecoverInit(hSession, pMechanism, hKey);
 }
 
 //---------------------------------------------------------------------------------------------
 CK_RV __attribute__((visibility("default"))) C_VerifyRecover(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, CK_ULONG ulSignatureLen, CK_BYTE_PTR pData, CK_ULONG_PTR pulDataLen)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return verifyRecover(hSession, pSignature, ulSignatureLen, pData, pulDataLen);
 }
 
 //---------------------------------------------------------------------------------------------
 CK_RV __attribute__((visibility("default"))) C_DigestEncryptUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen, CK_BYTE_PTR pEncryptedPart, CK_ULONG_PTR pulEncryptedPartLen)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return digestEncryptUpdate(hSession, pPart, ulPartLen, pEncryptedPart, pulEncryptedPartLen);
 }
 
 //---------------------------------------------------------------------------------------------
-CK_RV __attribute__((visibility("default"))) C_DecryptDigestUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen, CK_BYTE_PTR pDecryptedPart, CK_ULONG_PTR pulDecryptedPartLen)
+CK_RV __attribute__((visibility("default"))) C_DecryptDigestUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pEncryptedPart, CK_ULONG ulEncryptedPartLen, CK_BYTE_PTR pPart, CK_ULONG_PTR pulPartLen)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return decryptDigestUpdate(hSession, pEncryptedPart, ulEncryptedPartLen, pPart, pulPartLen);
 }
 
 //---------------------------------------------------------------------------------------------
 CK_RV __attribute__((visibility("default"))) C_SignEncryptUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen, CK_BYTE_PTR pEncryptedPart, CK_ULONG_PTR pulEncryptedPartLen)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return signEncryptUpdate(hSession, pPart, ulPartLen, pEncryptedPart, pulEncryptedPartLen);
 }
 
 //---------------------------------------------------------------------------------------------
 CK_RV __attribute__((visibility("default"))) C_DecryptVerifyUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pEncryptedPart, CK_ULONG ulEncryptedPartLen, CK_BYTE_PTR pPart, CK_ULONG_PTR pulPartLen)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return decryptVerifyUpdate(hSession, pEncryptedPart, ulEncryptedPartLen, pPart, pulPartLen);
 }
 
 //---------------------------------------------------------------------------------------------
-CK_RV __attribute__((visibility("default"))) C_DeriveKey(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hBaseKey, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount,  CK_OBJECT_HANDLE_PTR phKey)
+CK_RV __attribute__((visibility("default"))) C_DeriveKey(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hBaseKey, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulAttributeCount,  CK_OBJECT_HANDLE_PTR phKey)
 {
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    return deriveKey(hSession, pMechanism, hBaseKey, pTemplate, ulAttributeCount, phKey);
 }
 
 //---------------------------------------------------------------------------------------------
 CK_RV __attribute__((visibility("default"))) C_SeedRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSeed, CK_ULONG ulSeedLen)
 {
-    return CKR_RANDOM_NO_RNG;
+    return seedRandom(hSession, pSeed, ulSeedLen);
 }
 
 //---------------------------------------------------------------------------------------------
 CK_RV __attribute__((visibility("default"))) C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_ULONG ulRandomLen)
 {
-    return CKR_RANDOM_NO_RNG;
+    return generateRandom(hSession, pRandomData, ulRandomLen);
 }
 
 //---------------------------------------------------------------------------------------------

@@ -1,19 +1,19 @@
 /*
- * Copyright (C) 2019 Intel Corporation. All rights reserved.
+ * Copyright (C) 2019-2020 Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
+ *   1. Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *   2. Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *   3. Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -32,18 +32,7 @@
 #ifndef DIGEST_H
 #define DIGEST_H
 
-#include "CryptoEnclaveDefs.h"
-#include "p11Defines.h"
-#include "p11Sgx.h"
-#include "p11Access.h"
-#include "HashProvider.h"
-
-#include <map>
-
-static std::map<HashMode, HashDigestLength> hashDigestLengthMap = {
-                                                                    { HashMode::sha256, HashDigestLength::sha256 },
-                                                                    { HashMode::sha512, HashDigestLength::sha512 }
-                                                                  };
+#include "cryptoki.h"
 
 //---------------------------------------------------------------------------------------------
 /**
@@ -53,19 +42,6 @@ static std::map<HashMode, HashDigestLength> hashDigestLengthMap = {
 * @return  CK_RV        CKR_OK if digestInit is successful, error code otherwise
 */
 CK_RV digestInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism);
-
-
-//---------------------------------------------------------------------------------------------
-/**
-* Continues the digest operation.
-* @param   hSession  The session handle.
-* @param   pPart     Pointer to data to be digested.
-* @param   ulPartLen The size of data to be digested.
-* @return  CK_RV     CKR_OK if digestUpdate is successful, error code otherwise
-*/
-CK_RV digestUpdate(CK_SESSION_HANDLE hSession,
-                   CK_BYTE_PTR       pPart,
-                   CK_ULONG          ulPartLen);
 
 //---------------------------------------------------------------------------------------------
 /**
@@ -82,6 +58,21 @@ CK_RV digest(CK_SESSION_HANDLE hSession,
              CK_ULONG          ulDataLen,
              CK_BYTE_PTR       pDigest,
              CK_ULONG_PTR      pulDigestLen);
+
+//---------------------------------------------------------------------------------------------
+/**
+* Continues the digest operation.
+* @param   hSession  The session handle.
+* @param   pPart     Pointer to data to be digested.
+* @param   ulPartLen The size of data to be digested.
+* @return  CK_RV     CKR_OK if digestUpdate is successful, error code otherwise
+*/
+CK_RV digestUpdate(CK_SESSION_HANDLE hSession,
+                   CK_BYTE_PTR       pPart,
+                   CK_ULONG          ulPartLen);
+
+
+CK_RV digestKey(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hKey);
 
 //---------------------------------------------------------------------------------------------
 /**

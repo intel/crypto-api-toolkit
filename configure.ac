@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2019 Intel Corporation. All rights reserved.
+# Copyright (C) 2019-2020 Intel Corporation. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -29,7 +29,7 @@
 #
 #
 
-AC_INIT([cryptoapitoolkit], [1.5])
+AC_INIT([cryptoapitoolkit], [2.0])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE([foreign -Wall])
@@ -43,65 +43,41 @@ AC_ARG_WITH([sgxsdk],
             AC_HELP_STRING([--with-sgxsdk], [Requires SGX SDK. Will default to /opt/intel/sgxsdk]),
             [SGXSDK="${withval}"],
             [echo "--with-sgxsdk option not set. Defaults to /opt/intel/sgxsdk"; SGXSDK="/opt/intel/sgxsdk"])
+
 AC_ARG_WITH([sgxssl],
             AC_HELP_STRING([--with-sgxssl], [Requires SGX SSL. Will default to /opt/intel/sgxssl]),
             [SGXSSL="${withval}"],
             [echo "--with-sgxssl option not set. Defaults to /opt/intel/sgxssl"; SGXSSL="/opt/intel/sgxssl"])
 
-AC_ARG_WITH([toolkit-path],
-            AC_HELP_STRING([--with-toolkit-path], [Will default to /opt/intel/cryptoapitoolkit]),
+AC_ARG_WITH([token-path],
+            AC_HELP_STRING([--with-token-path], [Will default to /opt/intel/cryptoapitoolkit]),
             [TOKENPATH="${withval}"],
             [echo "--with-token-path option not set. Defaults to /opt/intel/cryptoapitoolkit"; TOKENPATH="/opt/intel/cryptoapitoolkit"])
 
-AC_ARG_WITH([dcap-path],
-            AC_HELP_STRING([--with-dcap-path], [Requires DCAP path for ECDSA attestation. If not passed, DCAP is not supported. ]),
-            [DCAP_PATH="${withval}"],
-            [echo "--with-dcap-path option not set. No support for DCAP (ECDSA based quote)"; DCAP_PATH="NO_PATH_SET_UNSUPPORTED"])
+AM_CONDITIONAL(WITH_DCAP, false)
 
-AC_ARG_ENABLE([import-raw-symkey-support],
-              AC_HELP_STRING([--enable-import-raw-symkey-support], [Enable importing raw symmetric key. Use with caution/only for test purposes.]),
-              [IMPORT_RAW_SYMKEY_SUPPORT="${enableval}"],
-              [echo "--import-raw-symkey-support option not set. Defaults to no support for importing raw symmetric key"; IMPORT_RAW_SYMKEY_SUPPORT="no"])
+AC_ARG_ENABLE([dcap],
+              AC_HELP_STRING([--enable-dcap], [To enable dcap supported build]),
+              [
+              ENABLE_DCAP="${enableval}"
+              ],
+              [echo "--enable-dcap option not set. ECDSA quote generation is not enabled"; DCAP_SUPPORT="no"])
 
-AS_IF([test "x$IMPORT_RAW_SYMKEY_SUPPORT" = "xyes"],
-      [AC_DEFINE([IMPORT_RAW_KEY], [], [Support for importing raw symmetric keys])])
-
-AC_ARG_ENABLE([import-raw-symkey-support-for-hmac],
-              AC_HELP_STRING([--enable-import-raw-symkey-support-for-hmac], [Enable importing raw symmetric key for HMAC. Use with caution/only for test purposes.]),
-              [IMPORT_RAW_SYMKEY_FOR_HMAC_SUPPORT="${enableval}"],
-              [echo "--import-raw-symkey-support-for-hmac option not set. Defaults to no support for importing raw symmetric key"; IMPORT_RAW_SYMKEY_FOR_HMAC_SUPPORT="no"])
-
-AS_IF([test "x$DCAP_PATH" != "xNO_PATH_SET_UNSUPPORTED"],
+AS_IF([test "x$ENABLE_DCAP" = "xyes"],
       [
-      AC_DEFINE([DCAP_SUPPORT], [], [DCAP Support])
-      AC_SUBST(DCAP_INCLUDE_PATH, $DCAP_PATH)
+      AC_DEFINE([DCAP_SUPPORT], [], [DCAP SUPPORT])
+      AC_SUBST(DCAP_INCLUDE_PATH, "/usr/include")
       AM_CONDITIONAL(WITH_DCAP, true)
-      echo "DCAP_INCLUDE_PATH set to $DCAP_INCLUDE_PATH"
-      ],
-      [
-      AM_CONDITIONAL(WITH_DCAP, false)
-      echo "Building without DCAP support"
       ]
       )
 
-AS_IF([test "x$IMPORT_RAW_SYMKEY_FOR_HMAC_SUPPORT" = "xyes"],
-      [AC_DEFINE([IMPORT_KEY_FOR_HMAC], [], [Support for importing raw symmetric key for HMAC])])
+AC_ARG_ENABLE([ephemeral-quote],
+              AC_HELP_STRING([--enable-ephemeral-quote], [Requires this option to destroy quote generation key after one unwrap]),
+              [EPHEMERAL_QUOTE_SUPPORT="${enableval}"],
+              [echo "--with-ephemeral-quote option not set. Quote genration key is not destroyed after one unwrap"; EPHEMERAL_QUOTE_SUPPORT="no"])
 
-AC_ARG_ENABLE([verify-with-ec-support],
-              AC_HELP_STRING([--enable-verify-with-ec-support], [Enable signature verification with EC key. Use with caution/only for test purposes.]),
-              [EC_VERIFY_SUPPORT="${enableval}"],
-              [echo "--verify-with-ec-support option not set. Defaults to no support for verifying signature with EC key"; EC_VERIFY_SUPPORT="no"])
-
-AS_IF([test "x$EC_VERIFY_SUPPORT" = "xyes"],
-      [AC_DEFINE([EC_VERIFY], [], [Support for signature verification using EC keys])])
-
-AC_ARG_ENABLE([verify-with-ed-support],
-              AC_HELP_STRING([--enable-verify-with-ed-support], [Enable signature verification with ED key. Use with caution/only for test purposes.]),
-              [ED_VERIFY_SUPPORT="${enableval}"],
-              [echo "--verify-with-ed-support option not set. Defaults to no support for verifying signature with ED key"; ED_VERIFY_SUPPORT="no"])
-
-AS_IF([test "x$ED_VERIFY_SUPPORT" = "xyes"],
-      [AC_DEFINE([ED_VERIFY], [], [Support for signature verification using ED keys])])
+AS_IF([test "x$EPHEMERAL_QUOTE_SUPPORT" = "xyes"],
+      [AC_DEFINE([EPHEMERAL_QUOTE], [], [EPHEMERAL QUOTE])])
 
 AC_SUBST(SGXSDKDIR, $SGXSDK)
 AC_SUBST(SGXSSLDIR, $SGXSSL)
@@ -126,9 +102,25 @@ echo "TOKENPATH present in path $TOKENPATH"
 AC_DEFINE_UNQUOTED([CRYPTOTOOLKIT_TOKENPATH], "${TOKENPATH}", [Crypto API Toolkit token path])
 
 AC_CONFIG_HEADERS([config.h])
-AC_CONFIG_FILES([Makefile src/Makefile src/p11/Makefile src/p11/untrusted/Makefile src/p11/trusted/Makefile src/p11Sample/Makefile])
+AC_CONFIG_FILES([Makefile src/Makefile src/p11/Makefile src/p11/untrusted/Makefile src/p11/trusted/Makefile src/p11/trusted/SoftHSMv2/Makefile src/p11/trusted/SoftHSMv2/common/Makefile src/p11/trusted/SoftHSMv2/crypto/Makefile src/p11/trusted/SoftHSMv2/data_mgr/Makefile src/p11/trusted/SoftHSMv2/object_store/Makefile src/p11/trusted/SoftHSMv2/session_mgr/Makefile src/p11/trusted/SoftHSMv2/slot_mgr/Makefile src/p11/trusted/SoftHSMv2/handle_mgr/Makefile src/test/Makefile])
+#AC_CONFIG_FILES([Makefile src/Makefile src/test/Makefile])
 
 AC_DEFINE_UNQUOTED([INSTALL_DIRECTORY], "${prefix}", [Crypto API Toolkit installation path])
+
+AC_DEFINE([SGXHSM], [], [SGX HSM])
+AC_DEFINE_UNQUOTED([DEFAULT_TOKENDIR], "${TOKENPATH}/tokens", [SGXHSM tokendir])
+AC_DEFINE_UNQUOTED([DEFAULT_OBJECTSTORE_BACKEND], "file", [SGXHSM default object store])
+AC_DEFINE_UNQUOTED([MIN_PIN_LEN], 4, [Minimum PIN length])
+AC_DEFINE_UNQUOTED([MAX_PIN_LEN], 16, [Maximum PIN length])
+AC_DEFINE_UNQUOTED([MAX_TRANSFER_BYTES], 184320, [(180*1024) This is the maximum size set for concatenated sub directories and files that can be safely copied into enclave based on StackMaxSize=0x40000. If there is a requirement to copy more size than this, StackMaxSize(in enclave's configuration xml) needs to be increased appropriately.])
+AC_DEFINE([WITH_AES_GCM], [], [WITH AES GCM])
+AC_DEFINE([HAVE_AES_KEY_WRAP], [], [HAVE AES KEY WRAP])
+AC_DEFINE([HAVE_AES_KEY_WRAP_PAD], [], [HAVE AES KEY WRAP PAD])
+AC_DEFINE([WITH_RAW_PSS], [], [WITH RAW PSS])
+AC_DEFINE([WITH_ECC], [], [WITH ECC])
+AC_DEFINE([WITH_EDDSA], [], [WITH EDDSA])
+
+AM_CONDITIONAL(AES_UNWRAP_RSA, false)
 
 AC_OUTPUT
 

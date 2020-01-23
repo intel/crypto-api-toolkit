@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2019 Intel Corporation. All rights reserved.
+# Copyright (C) 2019-2020 Intel Corporation. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -29,86 +29,144 @@
 #
 #
 
-noinst_DATA = p11Enclave_t.c p11Enclave_t.h
-AM_CFLAGS = -D_FORTIFY_SOURCE=2 -m64 -Wall -O2 -DOSID=1 -nostdinc -fvisibility=hidden -fpie -fpic -fstack-protector -fno-builtin-printf -Wformat -Wformat-security -include "tsgxsslio.h" -Wno-implicit-function-declaration -std=c11 -fno-strict-overflow -fno-delete-null-pointer-checks -fwrapv
-AM_CXXFLAGS = -D_FORTIFY_SOURCE=2 -std=c++11 -nostdinc++ -fstack-protector -Wformat -Wformat-security -fpie -fpic -fno-strict-overflow -fno-delete-null-pointer-checks -fwrapv
+MAINTAINERCLEANFILES =  $(srcdir)/Makefile.in
+
+AM_CFLAGS = -D_FORTIFY_SOURCE=2 -DOSID=1 -m64 -std=c11 -O3 -Wall -Wno-implicit-function-declaration -nostdinc -include "tsgxsslio.h" -fno-builtin-printf -fvisibility=hidden -fstack-protector -fpie -fpic -Wformat -Wformat-security -fno-strict-overflow -fno-delete-null-pointer-checks -fwrapv -Wreturn-type -Werror=return-type
+AM_CXXFLAGS = -D_FORTIFY_SOURCE=2 -DOSID=1 -m64 -std=c++11 -O3 -Wall -nostdinc++ -fstack-protector -fpie -fpic -Wformat -Wformat-security -fno-strict-overflow -fno-delete-null-pointer-checks -fwrapv -Wreturn-type -Werror=return-type
 
 if WITH_DCAP
-AM_CPPFLAGS = -I$(SGXSSLDIR)/include -I$(SGXSDKDIR)/include -I$(SGXSDKDIR)/include/ipp -I$(SGXSDKDIR)/include/tlibc -I$(SGXSDKDIR)/include/libcxx -I$(SGXSDKDIR)/include/stdc++ -I$(SGXSDKDIR)/include/stlport -I$(DCAP_INCLUDE_PATH) -I$(srcdir)/../include -I$(srcdir)/../enclave_config
+AM_CPPFLAGS = -I$(srcdir)/../enclave_config -I$(srcdir)/../../../ -I$(SGXSSLDIR)/include -I$(SGXSDKDIR)/include -I$(SGXSDKDIR)/include/ipp -I$(SGXSDKDIR)/include/tlibc -I$(SGXSDKDIR)/include/libcxx -I$(SGXSDKDIR)/include/stdc++ -I$(SGXSDKDIR)/include/stlport -I$(DCAP_INCLUDE_PATH) -I$(srcdir)/SoftHSMv2/ -I$(srcdir)/SoftHSMv2/pkcs11 -I$(srcdir)/SoftHSMv2/common
 else
-AM_CPPFLAGS = -I$(SGXSSLDIR)/include -I$(SGXSDKDIR)/include -I$(SGXSDKDIR)/include/ipp -I$(SGXSDKDIR)/include/tlibc -I$(SGXSDKDIR)/include/libcxx -I$(SGXSDKDIR)/include/stdc++ -I$(SGXSDKDIR)/include/stlport -I$(srcdir)/../include -I$(srcdir)/../enclave_config
+AM_CPPFLAGS = -I$(srcdir)/../enclave_config -I$(srcdir)/../../../ -I$(SGXSSLDIR)/include -I$(SGXSDKDIR)/include -I$(SGXSDKDIR)/include/ipp -I$(SGXSDKDIR)/include/tlibc -I$(SGXSDKDIR)/include/libcxx -I$(SGXSDKDIR)/include/stdc++ -I$(SGXSDKDIR)/include/stlport -I$(srcdir)/SoftHSMv2/ -I$(srcdir)/SoftHSMv2/pkcs11 -I$(srcdir)/SoftHSMv2/common
 endif
 
-EXTRA_DIST = $(srcdir)/../include/*.h \
-             $(srcdir)/../enclave_config/*.xml \
-             $(srcdir)/../enclave_config/*.pem \
-             $(srcdir)/../enclave_config/*.edl
+EXTRA_DIST = $(srcdir)/../enclave_config/*        \
+             $(srcdir)/*.h                        \
+             $(srcdir)/SoftHSMv2/*.h              \
+             $(srcdir)/SoftHSMv2/common/*.h       \
+             $(srcdir)/SoftHSMv2/crypto/*.h       \
+             $(srcdir)/SoftHSMv2//data_mgr/*.h    \
+             $(srcdir)/SoftHSMv2/handle_mgr/*.h   \
+             $(srcdir)/SoftHSMv2/object_store/*.h \
+             $(srcdir)/SoftHSMv2/pkcs11/*.h       \
+             $(srcdir)/SoftHSMv2/session_mgr/*.h  \
+             $(srcdir)/SoftHSMv2/slot_mgr/*.h
 
 noinst_LTLIBRARIES = libp11SgxEnclave.la
 
-libp11SgxEnclave_la_SOURCES =  p11Enclave_t.h \
-                               p11Enclave_t.c \
-                               SgxFileUtils.cpp \
-                               SgxFileUtils.h \
-                               TokenObjectParser.cpp \
-                               TokenObjectParser.h \
-                               p11Enclave.cpp \
-                               AsymmetricCrypto.cpp \
-                               AsymmetricCrypto.h \
-                               AsymmetricKeyCache.cpp \
-                               AsymmetricKeyCache.h \
-                               ByteBuffer.cpp \
-                               ByteBuffer.h \
-                               CryptParams.h \
-                               EVPContextHandle.cpp \
-                               EVPContextHandle.h \
-                               EVPCtxStateCache.cpp \
-                               EVPCtxStateCache.h \
-                               EVPDecrypt.cpp \
-                               EVPDecrypt.h \
-                               EVPEncrypt.cpp \
-                               EVPEncrypt.h \
-                               IppContextHandle.cpp \
-                               IppContextHandle.h \
-                               IppDecrypt.cpp \
-                               IppDecrypt.h \
-                               IppEncrypt.cpp \
-                               IppEncrypt.h \
-                               IppStateCache.cpp \
-                               IppStateCache.h \
-                               HashCrypto.cpp \
-                               HashCrypto.h \
-                               HashDefs.h \
-                               HashStateCache.cpp \
-                               HashStateCache.h \
-                               IppHash.cpp \
-                               IppHash.h \
-                               SymmetricCrypto.cpp \
-                               SymmetricCrypto.h \
-                               SymmetricKeyCache.cpp \
-                               SymmetricKeyCache.h \
-                               SoPinCache.cpp \
-                               SoPinCache.h
+libp11SgxEnclave_la_SOURCES = e_pkcs11t.h    \
+                              p11Enclave_t.h \
+                              p11Enclave_t.c \
+                              p11Enclave.cpp
+
+libp11SgxEnclave_la_LIBADD = SoftHSMv2/libsofthsm2.la
+
+SUBDIRS	= SoftHSMv2
+
+BUILT_SOURCES = p11Enclave_t.h
 
 p11Enclave_t.h: p11Enclave_t.c
 
 p11Enclave_t.c: $(SGX_EDGER8R) ../enclave_config/p11Enclave.edl
-	$(SGX_EDGER8R) --trusted p11Enclave.edl --search-path $(srcdir)/../enclave_config --search-path $(SGXSDKDIR)/include --search-path $(SGXSSLDIR)/include
+	$(SGX_EDGER8R) --trusted p11Enclave.edl --search-path $(srcdir)/../../../ --search-path $(srcdir)/../enclave_config --search-path $(SGXSDKDIR)/include --search-path $(SGXSSLDIR)/include
 
 all-local: libp11SgxEnclave.la
 	@echo "--------------------libp11SgxEnclave.la built-----------------------------"
 #   this is a workaround to relink the enclave because the linker flags for the enclave are not handled properly by libtool
 #	ls -laR ./.libs/
-	$(CXX) .libs/p11Enclave_t.o .libs/p11Enclave.o .libs/SgxFileUtils.o .libs/TokenObjectParser.o .libs/SoPinCache.o .libs/AsymmetricCrypto.o .libs/AsymmetricKeyCache.o .libs/ByteBuffer.o .libs/EVPContextHandle.o .libs/EVPCtxStateCache.o .libs/EVPDecrypt.o .libs/EVPEncrypt.o .libs/IppContextHandle.o .libs/IppDecrypt.o .libs/IppEncrypt.o .libs/IppStateCache.o .libs/HashCrypto.o .libs/HashStateCache.o .libs/IppHash.o .libs/SymmetricCrypto.o .libs/SymmetricKeyCache.o -m64 -Wall -O2 -D_FORTIFY_SOURCE=2 -Wl,--no-undefined -nostdlib -nodefaultlibs -nostartfiles -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now -pie -L/opt/intel/sgxssl/lib64 -Wl,--whole-archive -lsgx_tsgxssl -Wl,--no-whole-archive -lsgx_tsgxssl_crypto -L/opt/intel/sgxsdk/lib64 -Wl,--whole-archive -lsgx_trts -Wl,--no-whole-archive -Wl,--start-group -lsgx_tstdc -lsgx_tcxx -lsgx_tcrypto -lsgx_tservice -lsgx_tprotected_fs -Wl,--end-group -Wl,-Bstatic -Wl,-Bsymbolic -Wl,--no-undefined -Wl,-pie,-eenclave_entry -Wl,--export-dynamic -Wl,--defsym,__ImageBase=0 -Wpragmas -Wl,-soname -Wl,libp11SgxEnclave.so.0 -o .libs/libp11SgxEnclave.so.0.0.0
-	@$(SGX_SIGN) sign -key $(srcdir)/../enclave_config/p11Enclave_private.pem -enclave ./.libs/libp11SgxEnclave.so.0.0.0 -out ./.libs/libp11SgxEnclave.signed.so -config $(srcdir)/../enclave_config/p11Enclave.config.xml
-	@echo "--------------------libp11SgxEnclave.signed.so built-----------------------------"
+	$(CXX) .libs/p11Enclave_t.o                                         \
+		   .libs/p11Enclave.o                                           \
+		   ./SoftHSMv2/common/Configuration.o                           \
+		   ./SoftHSMv2/common/fatal.o                                   \
+		   ./SoftHSMv2/common/osmutex.o                                 \
+		   ./SoftHSMv2/common/MutexFactory.o                            \
+		   ./SoftHSMv2/handle_mgr/Handle.o                              \
+		   ./SoftHSMv2/handle_mgr/HandleManager.o                       \
+		   ./SoftHSMv2/data_mgr/SecureMemoryRegistry.o                  \
+		   ./SoftHSMv2/data_mgr/RFC4880.o                               \
+		   ./SoftHSMv2/data_mgr/SecureDataManager.o                     \
+		   ./SoftHSMv2/data_mgr/ByteString.o                            \
+		   ./SoftHSMv2/crypto/OSSLSHA512.o                              \
+		   ./SoftHSMv2/crypto/AsymmetricAlgorithm.o                     \
+		   ./SoftHSMv2/crypto/HashAlgorithm.o                           \
+		   ./SoftHSMv2/crypto/OSSLEDKeyPair.o                           \
+		   ./SoftHSMv2/crypto/OSSLAES.o                                 \
+		   ./SoftHSMv2/crypto/OSSLEVPSymmetricAlgorithm.o               \
+		   ./SoftHSMv2/crypto/EDPublicKey.o                             \
+		   ./SoftHSMv2/crypto/OSSLRSAPrivateKey.o                       \
+		   ./SoftHSMv2/crypto/SymmetricAlgorithm.o                      \
+		   ./SoftHSMv2/crypto/ECParameters.o                            \
+		   ./SoftHSMv2/crypto/OSSLECKeyPair.o                           \
+		   ./SoftHSMv2/crypto/OSSLEDDSA.o                               \
+		   ./SoftHSMv2/crypto/OSSLEVPMacAlgorithm.o                     \
+		   ./SoftHSMv2/crypto/OSSLSHA1.o                                \
+		   ./SoftHSMv2/crypto/OSSLSHA224.o                              \
+		   ./SoftHSMv2/crypto/OSSLSHA256.o                              \
+		   ./SoftHSMv2/crypto/OSSLUtil.o                                \
+		   ./SoftHSMv2/crypto/SymmetricKey.o                            \
+		   ./SoftHSMv2/crypto/RSAPublicKey.o                            \
+		   ./SoftHSMv2/crypto/OSSLSHA384.o                              \
+		   ./SoftHSMv2/crypto/OSSLECPublicKey.o                         \
+		   ./SoftHSMv2/crypto/OSSLCryptoFactory.o                       \
+		   ./SoftHSMv2/crypto/DerUtil.o                                 \
+		   ./SoftHSMv2/crypto/RSAParameters.o                           \
+		   ./SoftHSMv2/crypto/OSSLComp.o                                \
+		   ./SoftHSMv2/crypto/OSSLRSAKeyPair.o                          \
+		   ./SoftHSMv2/crypto/AESKey.o                                  \
+		   ./SoftHSMv2/crypto/OSSLECDSA.o                               \
+		   ./SoftHSMv2/crypto/EDPrivateKey.o                            \
+		   ./SoftHSMv2/crypto/OSSLEDPublicKey.o                         \
+		   ./SoftHSMv2/crypto/OSSLHMAC.o                                \
+		   ./SoftHSMv2/crypto/CryptoFactory.o                           \
+		   ./SoftHSMv2/crypto/ECPublicKey.o                             \
+		   ./SoftHSMv2/crypto/RSAPrivateKey.o                           \
+		   ./SoftHSMv2/crypto/OSSLRSA.o                                 \
+		   ./SoftHSMv2/crypto/AsymmetricKeyPair.o                       \
+		   ./SoftHSMv2/crypto/OSSLRSAPublicKey.o                        \
+		   ./SoftHSMv2/crypto/OSSLEVPHashAlgorithm.o                    \
+		   ./SoftHSMv2/crypto/ECPrivateKey.o                            \
+		   ./SoftHSMv2/crypto/MacAlgorithm.o                            \
+		   ./SoftHSMv2/crypto/OSSLECPrivateKey.o                        \
+		   ./SoftHSMv2/crypto/OSSLRNG.o                                 \
+		   ./SoftHSMv2/crypto/OSSLEDPrivateKey.o                        \
+		   ./SoftHSMv2/P11Objects.o                                     \
+		   ./SoftHSMv2/slot_mgr/Token.o                                 \
+		   ./SoftHSMv2/slot_mgr/SlotManager.o                           \
+		   ./SoftHSMv2/slot_mgr/Slot.o                                  \
+		   ./SoftHSMv2/object_store/OSToken.o                           \
+		   ./SoftHSMv2/object_store/ObjectStore.o                       \
+		   ./SoftHSMv2/object_store/ObjectFile.o                        \
+		   ./SoftHSMv2/object_store/FindOperation.o                     \
+		   ./SoftHSMv2/object_store/UUID.o                              \
+		   ./SoftHSMv2/object_store/SessionObjectStore.o                \
+		   ./SoftHSMv2/object_store/SessionObject.o                     \
+		   ./SoftHSMv2/object_store/OSAttribute.o                       \
+		   ./SoftHSMv2/object_store/ObjectStoreToken.o                  \
+		   ./SoftHSMv2/object_store/Directory.o                         \
+		   ./SoftHSMv2/object_store/Generation.o                        \
+		   ./SoftHSMv2/object_store/File.o                              \
+		   ./SoftHSMv2/main.o                                           \
+		   ./SoftHSMv2/access.o                                         \
+           ./SoftHSMv2/EnclaveSecureUtils.o                             \
+		   ./SoftHSMv2/SoftHSM.o                                        \
+		   ./SoftHSMv2/session_mgr/Session.o                            \
+		   ./SoftHSMv2/session_mgr/SessionManager.o                     \
+		   ./SoftHSMv2/P11Attributes.o                                  \
+		   -m64 -Wall -O2 -D_FORTIFY_SOURCE=2 -Wl,--no-undefined -nostdlib -nodefaultlibs -nostartfiles -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now -pie -L$(SGXSSLDIR)/lib64 -Wl,--whole-archive -lsgx_tsgxssl -Wl,--no-whole-archive -lsgx_tsgxssl_crypto -L$(SGXSDKDIR)/lib64 -Wl,--whole-archive -lsgx_trts -Wl,--no-whole-archive -Wl,--start-group -lsgx_tstdc -lsgx_tcxx -lsgx_tcrypto -lsgx_tservice -lsgx_tprotected_fs -Wl,--end-group -Wl,-Bstatic -Wl,-Bsymbolic -Wl,--no-undefined -Wl,-pie,-eenclave_entry -Wl,--export-dynamic -Wl,--defsym,__ImageBase=0 -Wpragmas -Wl,-soname -Wl,libp11SgxEnclave.so.0 -o .libs/libp11SgxEnclave.so.0.0.0
+		@$(SGX_SIGN) sign -key $(srcdir)/../enclave_config/p11Enclave_private.pem -enclave ./.libs/libp11SgxEnclave.so.0.0.0 -out ./.libs/libp11SgxEnclave.signed.so -config $(srcdir)/../enclave_config/p11Enclave.config.xml
+		@echo "--------------------libp11SgxEnclave.signed.so built-----------------------------"
 
 install-exec-local:
 	cp .libs/libp11SgxEnclave.signed.so $(prefix)/lib
 
 uninstall-local:
-	rm -f $(prefix)/lib/libp11SgxEnclave.signed.so*
-	rm -f $(prefix)/lib/libp11SgxEnclave.so.*
+	rm -f $(prefix)/lib/libp11SgxEnclave.signed.so* \
+	rm -f $(prefix)/lib/libp11SgxEnclave.so.*       \
+    rm -f $(prefix)/include/cryptoki.h              \
+    rm -f $(prefix)/include/pkcs11t.h               \
+    rm -f $(prefix)/include/pkcs11.h                \
+    rm -f $(prefix)/include/pkcs11f.h               \
+    rm -f $(prefix)/include/QuoteGeneration.h
 
 clean-local:
 	test -z *.la || rm -rf *.la

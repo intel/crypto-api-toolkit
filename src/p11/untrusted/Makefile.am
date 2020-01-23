@@ -1,5 +1,5 @@
  #
- # Copyright (C) 2019 Intel Corporation. All rights reserved.
+ # Copyright (C) 2019-2020 Intel Corporation. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -28,88 +28,59 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  #
  #
- 
+
+MAINTAINERCLEANFILES =  $(srcdir)/Makefile.in
+
 noinst_DATA = p11Enclave_u.c p11Enclave_u.h
 
-EXTRA_DIST = $(srcdir)/../include/*.h \
-             $(srcdir)/../enclave_config/*.xml \
-             $(srcdir)/../enclave_config/*.pem \
-             $(srcdir)/../enclave_config/*.edl
+EXTRA_DIST = $(srcdir)/../trusted/SoftHSMv2/pkcs11/*.h \
+             $(srcdir)/../enclave_config/*             \
+             $(srcdir)/*.h
+
 if WITH_DCAP
-AM_CPPFLAGS = -I$(SGXSDKDIR)/include -I$(srcdir)/../include -I$(DCAP_INCLUDE_PATH)
+AM_CPPFLAGS = -I$(srcdir)/../../../ -I$(srcdir)/../enclave_config -I$(SGXSDKDIR)/include -I$(srcdir)/../trusted/ -I$(srcdir)/../trusted/SoftHSMv2/pkcs11/ -I$(srcdir)/../trusted/SoftHSMv2/common -I$(DCAP_INCLUDE_PATH)
 DCAP_LIB = -lsgx_dcap_ql
 else
-AM_CPPFLAGS = -I$(SGXSDKDIR)/include -I$(srcdir)/../include
+AM_CPPFLAGS = -I$(srcdir)/../../../ -I$(srcdir)/../enclave_config -I$(SGXSDKDIR)/include -I$(srcdir)/../trusted/ -I$(srcdir)/../trusted/SoftHSMv2/pkcs11/ -I$(srcdir)/../trusted/SoftHSMv2/common/
 DCAP_LIB =
 endif
 
-AM_CXXFLAGS = -D_FORTIFY_SOURCE=2 -std=c++11 -fstack-protector -Wformat -Wformat-security -fpie -fpic -fexceptions -fno-strict-overflow -fno-delete-null-pointer-checks -fwrapv
-AM_CFLAGS = -D_FORTIFY_SOURCE=2 -fvisibility=hidden -fpie -fpic -fstack-protector -Wformat -Wformat-security -std=c11 -fexceptions -fno-strict-overflow -fno-delete-null-pointer-checks -fwrapv
+AM_CXXFLAGS = -D_FORTIFY_SOURCE=2 -m64 -std=c++11 -fpie -fpic -fstack-protector -Wformat -Wformat-security -fexceptions -fno-strict-overflow -fno-delete-null-pointer-checks -fwrapv -Wreturn-type -Werror=return-type
+AM_CFLAGS = -D_FORTIFY_SOURCE=2 -m64 -std=c11 -fvisibility=hidden -fpie -fpic -fstack-protector -Wformat -Wformat-security -fexceptions -fno-strict-overflow -fno-delete-null-pointer-checks -fwrapv -Wreturn-type -Werror=return-type
 
 AM_LDFLAGS = -L$(SGXSSLDIR)/lib64 -lsgx_usgxssl -L$(SGXSDKDIR)/lib64 $(DCAP_LIB) -lsgx_urts -lsgx_uae_service -lsgx_uprotected_fs \
              -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now -pie -export-dynamic -module -shared
 
 lib_LTLIBRARIES = libp11sgx.la
-libp11sgx_la_SOURCES =  p11Enclave_u.c \
-                        p11Enclave_u.h \
-                        Parallel.cpp \
-                        Parallel.h \
-                        p11Sgx.cpp \
-                        p11Sgx.h \
-                        p11Access.cpp \
-                        p11Access.h \
-                        SlotUtils.cpp \
-                        SlotUtils.h \
-                        TokenUtils.cpp \
-                        TokenUtils.h \
-                        EnclaveUtils.cpp \
-                        EnclaveUtils.h \
-                        AttributeUtils.cpp \
-                        AttributeUtils.h \
-                        FileUtils.cpp \
-                        FileUtils.h \
-                        EnclaveHelpers.cpp \
-                        EnclaveHelpers.h \
-                        Slot.h \
-                        Slot.cpp \
-                        Token.h \
-                        Token.cpp \
-                        SessionCache.cpp \
-                        SessionCache.h \
-                        ObjectCache.cpp \
-                        ObjectCache.h \
-                        AsymmetricProvider.cpp \
-                        AsymmetricProvider.h \
-                        HashProvider.cpp \
-                        HashProvider.h \
-                        P11Provider.cpp \
-                        P11Provider.h \
-                        SymmetricProvider.cpp \
-                        SymmetricProvider.h \
-                        Encryption.cpp \
-                        Encryption.h \
-                        Decryption.cpp \
-                        Decryption.h \
-                        Digest.cpp \
-                        Digest.h \
-                        GPFunctions.cpp \
-                        GPFunctions.h \
-                        KeyManagement.cpp \
-                        KeyManagement.h \
-                        ObjectManagement.cpp \
-                        ObjectManagement.h \
-                        SessionManagement.cpp \
-                        SessionManagement.h \
-                        SignVerify.cpp \
-                        SignVerify.h \
-                        SlotTokenManagement.cpp \
-                        SlotTokenManagement.h
 
+BUILT_SOURCES = p11Enclave_u.h
+libp11sgx_la_SOURCES =  p11Enclave_u.c                      \
+                        Parallel.cpp                        \
+                        p11Sgx.cpp                          \
+                        EnclaveInterface.cpp                \
+                        EnclaveHelpers.cpp                  \
+                        P11Provider.cpp                     \
+                        Encryption.cpp                      \
+                        Decryption.cpp                      \
+                        Digest.cpp                          \
+                        GPFunctions.cpp                     \
+                        KeyManagement.cpp                   \
+                        ObjectManagement.cpp                \
+                        SessionManagement.cpp               \
+                        SignAndMAC.cpp                      \
+                        SlotTokenManagement.cpp             \
+                        RNG.cpp                             \
+                        Verify.cpp                          \
+                        DualFunctionCryptoFunctions.cpp     \
+                        Directory.cpp                       \
+                        QuoteGeneration.cpp
+
+.PHONY: p11Enclave_u.c
 
 p11Enclave_u.h: p11Enclave_u.c
 
 p11Enclave_u.c:
-	$(SGX_EDGER8R) --untrusted p11Enclave.edl --search-path $(srcdir)/../include --search-path $(srcdir)/../enclave_config --search-path $(SGXSDKDIR)/include --search-path $(SGXSSLDIR)/include
+	$(SGX_EDGER8R) --untrusted p11Enclave.edl --search-path $(srcdir)/../../../ --search-path $(srcdir)/../enclave_config --search-path $(SGXSDKDIR)/include --search-path $(SGXSSLDIR)/include
 
 clean-local:
 	test -z *.la || rm -rf *.la

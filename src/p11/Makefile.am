@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2019 Intel Corporation. All rights reserved.
+# Copyright (C) 2019-2020 Intel Corporation. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -29,10 +29,11 @@
 #
 #
 
-EXTRA_DIST = $(srcdir)/include/*.h \
-             $(srcdir)/enclave_config/*.pem \
+MAINTAINERCLEANFILES =  $(srcdir)/Makefile.in
+
+EXTRA_DIST = $(srcdir)/enclave_config/*.pem \
              $(srcdir)/enclave_config/*.edl \
              $(srcdir)/enclave_config/*.xml
 
-AM_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/enclave_config
+AM_CPPFLAGS = -I$(srcdir)/enclave_config
 SUBDIRS = untrusted trusted

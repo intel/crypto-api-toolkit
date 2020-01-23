@@ -1,19 +1,19 @@
 /*
- * Copyright (C) 2019 Intel Corporation. All rights reserved.
+ * Copyright (C) 2019-2020 Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
+ *   1. Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *   2. Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *   3. Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -32,43 +32,7 @@
 #ifndef KEYMANAGEMENT_H
 #define KEYMANAGEMENT_H
 
-#include "config.h"
-#include "Slot.h"
-#include "p11Sgx.h"
-#include "p11Access.h"
-#include "AttributeUtils.h"
-#include "EnclaveHelpers.h"
-#include "SymmetricProvider.h"
-#include "AsymmetricProvider.h"
-
-#include <bitset>
-#include <cstring>
-#include <algorithm>
-
-enum WrapMode
-{
-    Unknown    = 0,
-    Aes        = 1,
-    Rsa        = 2,
-    PublicKey  = 3,
-    EpidQuote  = 4,
-    AesWrapRsa = 5,
-#ifdef DCAP_SUPPORT
-    EcdsaQuote = 6,
-#endif
-};
-
-struct WrapParams
-{
-    AesCryptParams      aesParams;
-    RsaCryptParams      rsaParams;
-    RsaEpidQuoteParams  rsaEpidQuoteParams;
-#ifdef DCAP_SUPPORT
-    RsaEcdsaQuoteParams rsaEcdsaQuoteParams;
-#endif
-};
-
-using KeyGenMechanismAttributeValue = std::pair<KeyGenerationMechanism, CK_ULONG>;
+#include "cryptoki.h"
 
 //---------------------------------------------------------------------------------------------
 /**
@@ -147,6 +111,11 @@ CK_RV unwrapKey(CK_SESSION_HANDLE    hSession,
                 CK_ATTRIBUTE_PTR     pTemplate,
                 CK_ULONG             ulCount,
                 CK_OBJECT_HANDLE_PTR hKey);
+
+
+CK_RV deriveKey(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism,
+                  CK_OBJECT_HANDLE hBaseKey, CK_ATTRIBUTE_PTR pTemplate,
+                  CK_ULONG ulAttributeCount, CK_OBJECT_HANDLE_PTR phKey);
 
 #endif //KEYMANAGEMENT_H
 

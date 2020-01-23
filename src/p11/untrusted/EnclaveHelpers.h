@@ -1,19 +1,19 @@
 /*
- * Copyright (C) 2019 Intel Corporation. All rights reserved.
+ * Copyright (C) 2019-2020 Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
+ *   1. Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *   2. Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *   3. Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -32,6 +32,8 @@
 #ifndef ENCLAVE_HELPERS_H
 #define ENCLAVE_HELPERS_H
 
+#include "config.h"
+
 #include <sgx_error.h>
 #include <sgx_eid.h>
 #include <sgx_urts.h>
@@ -40,8 +42,13 @@
 #include <map>
 
 #include "p11Enclave_u.h"
-#include "CryptoEnclaveDefs.h"
-#include "p11Defines.h"
+#include "cryptoki.h"
+
+static const std::string toolkitPath        = CRYPTOTOOLKIT_TOKENPATH;
+static const std::string tokenPath          = toolkitPath + "/tokens/";
+static const std::string installationPath   = INSTALL_DIRECTORY;
+static const std::string libraryDirectory   = installationPath + "/lib/";
+static const std::string defaultLibraryPath = "/usr/local/lib/";
 
 // Globals with file scope.
 namespace P11Crypto
@@ -91,13 +98,6 @@ namespace P11Crypto
         * @return sgx_status_t   SGX_SUCCESS if enclave unload is successful, error code otherwise.
         */
         sgx_status_t unloadSgxEnclave();
-
-        /*
-        * Maps the enclave return code to PKCS status code.
-        * @param  enclaveStatus  The enclave return code.
-        * @return CK_RV          CKR_OK if operation is successful, error code otherwise.
-        */
-        CK_RV enclaveStatusToPkcsStatus(const SgxCryptStatus& enclaveStatus);
 
         // Invalid SGX enclave ID value.
         static sgx_enclave_id_t mEnclaveInvalidId;

@@ -1,19 +1,19 @@
 /*
- * Copyright (C) 2019 Intel Corporation. All rights reserved.
+ * Copyright (C) 2019-2020 Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
+ *   1. Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *   2. Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *   3. Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -30,128 +30,99 @@
  */
 
 #include "GPFunctions.h"
+#include "p11Sgx.h"
+#include "EnclaveInterface.h"
+
+#include <iostream>
+
+CK_RV checkInitArgs(CK_VOID_PTR pInitArgs)
+{
+    CK_C_INITIALIZE_ARGS_PTR args;
+
+    if (pInitArgs != NULL_PTR)
+    {
+        args = (CK_C_INITIALIZE_ARGS_PTR)pInitArgs;
+
+        // Must be set to NULL_PTR in this version of PKCS#11
+        if (args->pReserved != NULL_PTR)
+        {
+            // ERROR_MSG("pReserved must be set to NULL_PTR");
+            return CKR_ARGUMENTS_BAD;
+        }
+
+        // SGXHSM does not support application provided mutex callbacks
+        if (args->CreateMutex != NULL_PTR ||
+            args->DestroyMutex != NULL_PTR ||
+            args->LockMutex != NULL_PTR ||
+            args->UnlockMutex != NULL_PTR)
+        {
+            return CKR_ARGUMENTS_BAD;
+        }
+    }
+
+    return CKR_OK;
+}
 
 //---------------------------------------------------------------------------------------------
-CK_RV initializeProvider(CK_VOID_PTR pInitArgs)
+CK_RV initialize(CK_VOID_PTR pInitArgs)
 {
     CK_RV rv = CKR_FUNCTION_FAILED;
 
-    do
+    if (isInitialized())
     {
-        if (isInitialized())
+        return CKR_CRYPTOKI_ALREADY_INITIALIZED;
+        // break;
+    }
+
+    rv = checkInitArgs(pInitArgs);
+    if (rv != CKR_OK)
+    {
+        return rv;
+    }
+
+    // I think we need to verify this flow - this is not correct - the tests are failing if this is not forced as CKR_OK;
+    //rv = CKR_OK;
+
+    if (EnclaveInterface::loadEnclave())
+    {
+        rv == EnclaveInterface::initialize(pInitArgs);
+
+        if(CKR_OK == rv)
         {
-            rv = CKR_CRYPTOKI_ALREADY_INITIALIZED;
-            break;
-        }
-
-        if (pInitArgs)
-        {
-            CK_C_INITIALIZE_ARGS_PTR args = (CK_C_INITIALIZE_ARGS_PTR)pInitArgs;
-
-            if (args->pReserved)
-            {
-                rv = CKR_ARGUMENTS_BAD;
-                break;
-            }
-
-            // If CKF_LIBRARY_CANT_CREATE_OS_THREADS is set, the library shouldn't create its own threads.
-            // Hence rejecting it.
-            if (CKF_LIBRARY_CANT_CREATE_OS_THREADS & args->flags)
-            {
-                rv = CKR_NEED_TO_CREATE_THREADS;
-                break;
-            }
-
-            bool appProvidedLock {true};
-            appProvidedLock = args->CreateMutex || args->DestroyMutex || args->LockMutex || args->UnlockMutex;
-
-            // Rejecting if CKF_OS_LOCKING_OK is not set AND mutex locks are passed from application.
-            if (!(CKF_OS_LOCKING_OK & args->flags) && appProvidedLock)
-            {
-                rv = CKR_CANT_LOCK;
-                break;
-            }
-
-            rv = CKR_OK;
+            init();
         }
         else
         {
-            rv = CKR_OK;
+            return rv;
         }
-    } while (false);
-
-    if (CKR_OK == rv)
+    }
+    else
     {
-        if (Utils::EnclaveUtils::loadEnclave())
-        {
-            initialize();
-        }
-        else
-        {
-            rv = CKR_DEVICE_ERROR;
-        }
+        rv = CKR_DEVICE_ERROR;
     }
 
     return rv;
 }
 
 //---------------------------------------------------------------------------------------------
-CK_RV finalizeProvider(CK_VOID_PTR pReserved)
+CK_RV finalize(CK_VOID_PTR pReserved)
 {
     CK_RV rv = CKR_OK;
 
-    do
+    if (!isInitialized())
     {
-        if (pReserved)
-        {
-            rv = CKR_ARGUMENTS_BAD;
-            break;
-        }
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
 
-        if (!isInitialized())
-        {
-            rv = CKR_CRYPTOKI_NOT_INITIALIZED;
-            break;
-        }
+    if (pReserved != NULL_PTR)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
 
-        // Clear provider caches.
-        if (gSessionCache)
-        {
-            std::vector<CK_SLOT_ID> slotIDs;
-
-            // Remove all slot/token files used by this application.
-            slotIDs = gSessionCache->getAllSlotIDs();
-            unsigned int slotCount = slotIDs.size();
-
-            for (unsigned int i = 0; i < slotCount; ++i)
-            {
-                P11Crypto::Slot slot(slotIDs[i]);
-                if (!slot.valid())
-                {
-                    rv = CKR_SLOT_ID_INVALID;
-                    continue;
-                }
-
-                P11Crypto::Token* token = slot.getToken();
-                if (!token)
-                {
-                    rv = CKR_TOKEN_NOT_PRESENT;
-                    continue;
-                }
-
-                rv = token->finalize();
-            }
-
-            // Clear session handle cache.
-            gSessionCache->clear();
-
-            rv = CKR_OK;
-        }
-
-        // Destroy Enclave.
-        Utils::EnclaveUtils::unloadEnclave();
-        deinitialize();
-    } while (false);
+    // Destroy Enclave.
+    rv = EnclaveInterface::finalize(pReserved);
+    EnclaveInterface::unloadEnclave();
+    deinit();
 
     return rv;
 }
@@ -159,41 +130,12 @@ CK_RV finalizeProvider(CK_VOID_PTR pReserved)
 //---------------------------------------------------------------------------------------------
 CK_RV getInfo(CK_INFO_PTR pInfo)
 {
-    CK_RV rv = CKR_FUNCTION_FAILED;
-
-    do
+    if (!isInitialized())
     {
-        if (!isInitialized())
-        {
-            rv = CKR_CRYPTOKI_NOT_INITIALIZED;
-            break;
-        }
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
 
-        if (!pInfo)
-        {
-            rv = CKR_ARGUMENTS_BAD;
-            break;
-        }
-
-        pInfo->cryptokiVersion.major = CRYPTOKI_VERSION_MAJOR;
-        pInfo->cryptokiVersion.minor = CRYPTOKI_VERSION_MINOR;
-
-        std::memset(pInfo->manufacturerID, ' ', 32);
-        std::memcpy(pInfo->manufacturerID, MANUFACTURER_ID, sizeof(MANUFACTURER_ID) - 1);
-
-        pInfo->flags = 0;
-
-        std::memset(pInfo->libraryDescription, ' ', 32);
-        std::memcpy(pInfo->libraryDescription, LIBRARY_DESC, sizeof(LIBRARY_DESC) - 1);
-
-        // (Todo) Make this a configurable option via configure.ac
-        pInfo->libraryVersion.major = LIBRARY_VERSION_MAJOR;
-        pInfo->libraryVersion.minor = LIBRARY_VERSION_MINOR;
-
-        rv = CKR_OK;
-    } while(false);
-
-    return rv;
+    return EnclaveInterface::getInfo(pInfo);
 }
 
 //---------------------------------------------------------------------------------------------

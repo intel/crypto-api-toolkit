@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2019 Intel Corporation. All rights reserved.
+# Copyright (C) 2019-2020 Intel Corporation. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -29,15 +29,16 @@
 #
 #
 
-EXTRA_DIST = $(srcdir)/src/p11/include/Constants.h \
-             $(srcdir)/src/p11/include/p11Defines.h \
-             $(srcdir)/src/p11/include/pkcs11.h \
-             $(srcdir)/src/p11/include/pkcs11f.h \
-             $(srcdir)/src/p11/include/pkcs11t.h \
+ACLOCAL_AMFLAGS = -I m4
+
+EXTRA_DIST = $(srcdir)/src/p11/trusted/SoftHSMv2/pkcs11/cryptoki.h \
+             $(srcdir)/src/p11/trusted/SoftHSMv2/pkcs11/pkcs11.h \
+             $(srcdir)/src/p11/trusted/SoftHSMv2/pkcs11/pkcs11f.h \
+             $(srcdir)/src/p11/trusted/SoftHSMv2/pkcs11/pkcs11t.h \
              $(srcdir)/src/p11/enclave_config/p11Enclave.config.xml \
              $(srcdir)/src/p11/enclave_config/p11Enclave.edl \
-             $(srcdir)/src/p11/enclave_config/p11Enclave.pem \
-             $(srcdir)/src/p11/enclave_config/p11Enclave_private.pem
+             $(srcdir)/src/p11/enclave_config/p11Enclave_private.pem \
+             $(srcdir)/autogen.sh
 
 dist-hook:
 	rm -f $(distdir)/src/p11/trusted/p11Enclave_t*
@@ -50,7 +51,4 @@ install-exec-local:
 	chmod -R 1777 $(CATKTOKENPATH)/tokens
 	mkdir -p $(prefix)/include
 	chmod -R 1777 $(prefix)/include
-	cp $(srcdir)/src/p11/include/p11Defines.h $(prefix)/include/
-
-uninstall-local:
-	test -z $(prefix)/include/p11Defines.h || rm -f $(prefix)/include/p11Defines.h
+	cp $(srcdir)/src/p11/trusted/SoftHSMv2/pkcs11/* $(srcdir)/src/p11/trusted/SoftHSMv2/common/QuoteGeneration.h $(prefix)/include

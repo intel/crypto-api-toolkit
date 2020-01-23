@@ -1,19 +1,19 @@
 /*
- * Copyright (C) 2019 Intel Corporation. All rights reserved.
+ * Copyright (C) 2019-2020 Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in
- *     the documentation and/or other materials provided with the
- *     distribution.
- *   * Neither the name of Intel Corporation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
+ *   1. Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *   2. Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in
+ *      the documentation and/or other materials provided with the
+ *      distribution.
+ *   3. Neither the name of Intel Corporation nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -32,17 +32,20 @@
 #ifndef P11_PROVIDER_H
 #define P11_PROVIDER_H
 
-#include "p11Defines.h"
+#include "cryptoki.h"
 #include "GPFunctions.h"
-#include "KeyManagement.h"
-#include "SessionManagement.h"
 #include "SlotTokenManagement.h"
-#include "Parallel.h"
+#include "SessionManagement.h"
+#include "ObjectManagement.h"
 #include "Encryption.h"
 #include "Decryption.h"
 #include "Digest.h"
-#include "SignVerify.h"
-#include "ObjectManagement.h"
+#include "SignAndMAC.h"
+#include "Verify.h"
+#include "DualFunctionCryptoFunctions.h"
+#include "KeyManagement.h"
+#include "RNG.h"
+#include "Parallel.h"
 
 #define PKCS_API
 
@@ -120,43 +123,6 @@ static CK_FUNCTION_LIST functionList =
     C_GetFunctionStatus,
     C_CancelFunction,
     C_WaitForSlotEvent
-};
-
-static CK_MECHANISM_TYPE symmetricMechanisms[] =
-{
-    CKM_AES_KEY_GEN,
-    CKM_AES_CTR,
-    CKM_AES_GCM,
-    CKM_AES_CBC,
-    CKM_AES_CBC_PAD,
-};
-
-static CK_MECHANISM_TYPE asymmetricMechanisms[] =
-{
-    CKM_RSA_PKCS_KEY_PAIR_GEN,
-    CKM_RSA_PKCS,
-    CKM_RSA_PKCS_OAEP,
-    CKM_SHA256_RSA_PKCS,
-    CKM_SHA512_RSA_PKCS,
-    CKM_RSA_PKCS_PSS,
-    CKM_SHA256_RSA_PKCS_PSS,
-    CKM_SHA512_RSA_PKCS_PSS,
-    CKM_EXPORT_RSA_PUBLIC_KEY,
-    CKM_IMPORT_RSA_PUBLIC_KEY,
-    CKM_EXPORT_EPID_QUOTE_RSA_PUBLIC_KEY,
-    CKM_EXPORT_ECDSA_QUOTE_RSA_PUBLIC_KEY,
-    CKM_EC_KEY_PAIR_GEN,
-    CKM_EC_EDWARDS_KEY_PAIR_GEN,
-    CKM_ECDSA,
-    CKM_EDDSA,
-};
-
-static CK_MECHANISM_TYPE digestMechanisms[] =
-{
-    CKM_SHA256,
-    CKM_SHA512,
-    CKM_SHA256_HMAC_AES_KEYID,
-    CKM_SHA512_HMAC_AES_KEYID,
 };
 
 #endif //P11_PROVIDER_H
