@@ -2,14 +2,13 @@
 *.deps
 *.libs
 *.in
-Makefile
 *.la
 *.lo
 *.m4
 **/build-aux
 **/autom4te.cache
 config.status
-config.h.in
+config.h.in*
 config.log
 config.h
 *_t.h
@@ -17,6 +16,7 @@ config.h
 *_u.h
 *_u.c
 libtool
+Makefile
 configure
 stamp-h1
-p11SgxSample
+p11test
