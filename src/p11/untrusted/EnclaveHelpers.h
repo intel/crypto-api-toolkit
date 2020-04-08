@@ -38,7 +38,6 @@
 #include <sgx_eid.h>
 #include <sgx_urts.h>
 #include <sgx_error.h>
-#include <sgx_uae_service.h>
 #include <map>
 
 #include "p11Enclave_u.h"

@@ -30,35 +30,15 @@
  */
 
 /*****************************************************************************
-QuoteGeneration.h
+QuoteGenerationDefs.h
 
- This file contains structures for quote generation
+ This file contains Definition for quote generation
  *****************************************************************************/
-#ifndef _QUOTEGENERATION_H
-#define _QUOTEGENERATION_H
+#ifndef _QUOTEGENERATIONDEFS_H
+#define _QUOTEGENERATIONDEFS_H
 
-#include "QuoteGenerationDefs.h"
+// Crypto API Toolkit custom CKMs
+#define CKM_EXPORT_ECDSA_QUOTE_RSA_PUBLIC_KEY          (CKM_VENDOR_DEFINED + 0x0000210DUL)
+#define CKM_EXPORT_ECDSA_QUOTE_RSA_PUBLIC_KEY_INTERNAL (CKM_EXPORT_ECDSA_QUOTE_RSA_PUBLIC_KEY + 1)
 
-#include <sgx_quote.h>
-#include <sgx_pce.h>
-#include <sgx_dcap_ql_wrapper.h>
-
-typedef struct CK_RSA_PUBLIC_KEY_PARAMS {
-    CK_ULONG ulExponentLen;
-    CK_ULONG ulModulusLen;
-} CK_RSA_PUBLIC_KEY_PARAMS;
-
-typedef struct CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS {
-    CK_LONG qlPolicy;
-} CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS;
-
-typedef CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS* CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS_PTR;
-
-typedef struct CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS_INTERNAL {
-    sgx_target_info_t targetInfo;
-    uint32_t quoteLength;
-} CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS_INTERNAL;
-
-typedef CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS_INTERNAL* CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS_INTERNAL_PTR;
-
-#endif // !_QUOTEGENERATION_H
+#endif // !_QUOTEGENERATIONDEFS_H

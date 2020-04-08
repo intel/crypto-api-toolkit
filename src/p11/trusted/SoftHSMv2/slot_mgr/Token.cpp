@@ -560,10 +560,10 @@ CK_RV Token::getTokenInfo(CK_TOKEN_INFO_PTR info)
 	info->ulFreePublicMemory = CK_UNAVAILABLE_INFORMATION;
 	info->ulTotalPrivateMemory = CK_UNAVAILABLE_INFORMATION;
 	info->ulFreePrivateMemory = CK_UNAVAILABLE_INFORMATION;
-	info->hardwareVersion.major = 2; //VERSION_MAJOR;
-	info->hardwareVersion.minor = 5; // VERSION_MINOR;
-	info->firmwareVersion.major = 2; //VERSION_MAJOR;
-	info->firmwareVersion.minor = 5; //VERSION_MINOR;
+	info->hardwareVersion.major = 2; //Major version of SGX driver that is used to validate CTK;
+	info->hardwareVersion.minor = 6; //Minor version of SGX driver that is used to validate CTK;
+	info->firmwareVersion.major = 2; //Major version of SGX SDK that is used to validate CTK
+	info->firmwareVersion.minor = 9; //Minor version of SGX SDK that is used to validate CTK;
 
 #ifndef SGXHSM	
 	time_t rawtime;

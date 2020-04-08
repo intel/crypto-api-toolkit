@@ -23,6 +23,7 @@ Crypto API Toolkit for Intel(R) SGX
   - [Quote Verification](#quote-verification)
 - [Multithreading support](#multithreading-support)
 - [Restrictions](#restrictions)
+- [Using Crypto API Toolkit](#using-crypto-api-toolkit)
 
 
 
@@ -55,12 +56,12 @@ The common software requirements for building the CTK are listed below. Please r
   ``$ sudo apt-get install dkms libprotobuf10 autoconf libcppunit-dev autotools-dev libc6-dev libtool build-essential``
 
 - Intel(R) SGX software components  
-  -  The latest version of SDK, driver and PSW can be downloaded and installed from https://01.org/intel-software-guard-extensions/downloads or can be built from the source from https://github.com/intel/linux-sgx. 
-  - Intel(R) SGX SSL  
+  -  The SDK, driver and PSW can be downloaded and installed from <a href=https://01.org/intel-softwareguard-extensions/downloads/intel-sgx-linux-2.9-release-version-string-2.9.100.2>Intel SGX Linux 2.9 Release</a> or can be built from the source from https://github.com/intel/linux-sgx.  
+  - Intel(R) SGX SSL - built with All-Loads-Mitigation for CVE-2020-0551  
     Can be built from the source and installed from https://github.com/intel/intel-sgx-ssl. CTK has been validated with Intel(R) SGX SSL built with OpenSSL version 1.1.1d.
   - (For DCAP support) The latest version of DCAP binaries and driver can be downloaded and installed from https://01.org/intel-software-guard-extensions/downloads or built from the source from https://github.com/intel/SGXDataCenterAttestationPrimitives.
 
-> **NOTE** This version of CTK is validated against Intel SGX SDK and driver v2.7.1 and DCAP v1.3.1.
+> **NOTE** This version of CTK is configured to build with, and validated against Intel SGX SDK v2.9, SGX driver v2.6.0_95eaa6f, DCAP v1.5 and SGXSSL binaries with All-Loads-Mitigation for CVE-2020-0551.
 
 ## Building the source
 
@@ -88,6 +89,7 @@ The options that ``configure`` supports can be obtained by running ``./configure
 |--with-token-path | Path where PKCS11 tokens and objects will be stored | /opt/intel/cryptoapitoolkit |
 |--enable-dcap | Build with DCAP support | Build without DCAP support  |
 |--enable-ephemeral-quote | Destroy the key used for quote generation after one unwrap | Don't destroy |
+|--with-p11-kit-path | p11-kit include directory path | Build without p11-kit, using PKCS11 headers from CTK |
 
 ### Compiling
 ``$ make``
@@ -253,3 +255,16 @@ CTK imposes certain restrictions to further harden the security. They are listed
   - The key used to generate a quote cannot be created with CKA_TOKEN attribute set to true. It must be a session key object.
   - If CTK is built with ephemeral key for quote generation, the key (pair) will be destroyed after using the key for one unwrap operation.
   - The key used to generate a quote cannot be used for sign and verify operations in addition to encryption and decryption operations.
+
+## Using Crypto API Toolkit
+
+This section demonstrates how to use pkcs11-tool to create a token and an RSA keypair. The CTK build results in two shared object files: `libp11sgx.so` (untrusted) and `libp11SgxEnclave.signed.so` (trusted). The untrusted shared object (`lip11sgx.so` from the installation directory) should be used in the place of PKCS11 module for use with tools like pkcs11-tool.
+
+### Creating a token
+`$pkcs11-tool --module /usr/local/lib/libp11sgx.so --init-token --label "ctk" --slot 0 --so-pin 1234 --init-pin --pin 1234`
+
+### Creating an RSA keypair
+`$pkcs11-tool --module /usr/local/lib/libp11sgx.so --login --pin 1234 --id 0001 --token "ctk" --keypairgen --key-type rsa:3072 --label "cert-key" --usage-sign`
+
+### Listing the objects
+`$pkcs11-tool --module /usr/local/lib/libp11sgx.so --list-objects -login --pin 1234 --login-type user`

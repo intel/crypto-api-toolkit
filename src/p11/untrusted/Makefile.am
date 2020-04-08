@@ -38,17 +38,23 @@ EXTRA_DIST = $(srcdir)/../trusted/SoftHSMv2/pkcs11/*.h \
              $(srcdir)/*.h
 
 if WITH_DCAP
-AM_CPPFLAGS = -I$(srcdir)/../../../ -I$(srcdir)/../enclave_config -I$(SGXSDKDIR)/include -I$(srcdir)/../trusted/ -I$(srcdir)/../trusted/SoftHSMv2/pkcs11/ -I$(srcdir)/../trusted/SoftHSMv2/common -I$(DCAP_INCLUDE_PATH)
+AM_CPPFLAGS = -I$(srcdir)/../../../ -I$(srcdir)/../enclave_config -I$(SGXSDKDIR)/include -I$(srcdir)/../trusted/ -I$(srcdir)/../trusted/SoftHSMv2/common -I$(DCAP_INCLUDE_PATH)
 DCAP_LIB = -lsgx_dcap_ql
 else
-AM_CPPFLAGS = -I$(srcdir)/../../../ -I$(srcdir)/../enclave_config -I$(SGXSDKDIR)/include -I$(srcdir)/../trusted/ -I$(srcdir)/../trusted/SoftHSMv2/pkcs11/ -I$(srcdir)/../trusted/SoftHSMv2/common/
+AM_CPPFLAGS = -I$(srcdir)/../../../ -I$(srcdir)/../enclave_config -I$(SGXSDKDIR)/include -I$(srcdir)/../trusted/ -I$(srcdir)/../trusted/SoftHSMv2/common/
 DCAP_LIB =
+endif
+
+if WITH_P11_KIT
+AM_CPPFLAGS += -I$(P11_KIT_INCLUDE_PATH)
+else
+AM_CPPFLAGS += -I$(srcdir)/../trusted/SoftHSMv2/pkcs11/
 endif
 
 AM_CXXFLAGS = -D_FORTIFY_SOURCE=2 -m64 -std=c++11 -fpie -fpic -fstack-protector -Wformat -Wformat-security -fexceptions -fno-strict-overflow -fno-delete-null-pointer-checks -fwrapv -Wreturn-type -Werror=return-type
 AM_CFLAGS = -D_FORTIFY_SOURCE=2 -m64 -std=c11 -fvisibility=hidden -fpie -fpic -fstack-protector -Wformat -Wformat-security -fexceptions -fno-strict-overflow -fno-delete-null-pointer-checks -fwrapv -Wreturn-type -Werror=return-type
 
-AM_LDFLAGS = -L$(SGXSSLDIR)/lib64 -lsgx_usgxssl -L$(SGXSDKDIR)/lib64 $(DCAP_LIB) -lsgx_urts -lsgx_uae_service -lsgx_uprotected_fs \
+AM_LDFLAGS = -L$(SGXSSLDIR)/lib64 -lsgx_usgxssl -L$(SGXSDKDIR)/lib64 $(DCAP_LIB) -lsgx_urts -lsgx_uprotected_fs \
              -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now -pie -export-dynamic -module -shared
 
 lib_LTLIBRARIES = libp11sgx.la

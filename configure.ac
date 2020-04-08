@@ -54,6 +54,11 @@ AC_ARG_WITH([token-path],
             [TOKENPATH="${withval}"],
             [echo "--with-token-path option not set. Defaults to /opt/intel/cryptoapitoolkit"; TOKENPATH="/opt/intel/cryptoapitoolkit"])
 
+AC_ARG_WITH([p11-kit-path],
+            AC_HELP_STRING([--with-p11-kit-path], [Requires p11-kit include directory.]),
+            [P11KITINCLUDEPATH="${withval}"],
+            [echo "--with-p11-kit-path option not set. Not including PKCS11 headers from p11-kit."; P11KITINCLUDEPATH="no"])
+
 AM_CONDITIONAL(WITH_DCAP, false)
 
 AC_ARG_ENABLE([dcap],
@@ -62,6 +67,18 @@ AC_ARG_ENABLE([dcap],
               ENABLE_DCAP="${enableval}"
               ],
               [echo "--enable-dcap option not set. ECDSA quote generation is not enabled"; DCAP_SUPPORT="no"])
+
+AM_CONDITIONAL(WITH_P11_KIT, false)
+
+if test "x$P11KITINCLUDEPATH" != "xno"; then
+    AC_CHECK_FILE(${P11KITINCLUDEPATH}/pkcs11.h, , [P11KITINCLUDEPATHDIR=no])
+    if test x"$P11KITINCLUDEPATHDIR" = "xno"; then
+        AC_MSG_ERROR([This package needs p11-kit include directory path])
+    else
+        AC_SUBST(P11_KIT_INCLUDE_PATH, $P11KITINCLUDEPATH)
+        AM_CONDITIONAL(WITH_P11_KIT, true)
+    fi
+fi
 
 AS_IF([test "x$ENABLE_DCAP" = "xyes"],
       [

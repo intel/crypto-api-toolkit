@@ -35,9 +35,15 @@ AM_CFLAGS = -D_FORTIFY_SOURCE=2 -DOSID=1 -m64 -std=c11 -O3 -Wall -Wno-implicit-f
 AM_CXXFLAGS = -D_FORTIFY_SOURCE=2 -DOSID=1 -m64 -std=c++11 -O3 -Wall -nostdinc++ -fstack-protector -fpie -fpic -Wformat -Wformat-security -fno-strict-overflow -fno-delete-null-pointer-checks -fwrapv -Wreturn-type -Werror=return-type
 
 if WITH_DCAP
-AM_CPPFLAGS = -I$(srcdir)/../enclave_config -I$(srcdir)/../../../ -I$(SGXSSLDIR)/include -I$(SGXSDKDIR)/include -I$(SGXSDKDIR)/include/ipp -I$(SGXSDKDIR)/include/tlibc -I$(SGXSDKDIR)/include/libcxx -I$(SGXSDKDIR)/include/stdc++ -I$(SGXSDKDIR)/include/stlport -I$(DCAP_INCLUDE_PATH) -I$(srcdir)/SoftHSMv2/ -I$(srcdir)/SoftHSMv2/pkcs11 -I$(srcdir)/SoftHSMv2/common
+AM_CPPFLAGS = -I$(srcdir)/../enclave_config -I$(srcdir)/../../../ -I$(SGXSSLDIR)/include -I$(SGXSDKDIR)/include -I$(SGXSDKDIR)/include/ipp -I$(SGXSDKDIR)/include/tlibc -I$(SGXSDKDIR)/include/libcxx -I$(SGXSDKDIR)/include/stdc++ -I$(SGXSDKDIR)/include/stlport -I$(DCAP_INCLUDE_PATH) -I$(srcdir)/SoftHSMv2/ -I$(srcdir)/SoftHSMv2/common
 else
-AM_CPPFLAGS = -I$(srcdir)/../enclave_config -I$(srcdir)/../../../ -I$(SGXSSLDIR)/include -I$(SGXSDKDIR)/include -I$(SGXSDKDIR)/include/ipp -I$(SGXSDKDIR)/include/tlibc -I$(SGXSDKDIR)/include/libcxx -I$(SGXSDKDIR)/include/stdc++ -I$(SGXSDKDIR)/include/stlport -I$(srcdir)/SoftHSMv2/ -I$(srcdir)/SoftHSMv2/pkcs11 -I$(srcdir)/SoftHSMv2/common
+AM_CPPFLAGS = -I$(srcdir)/../enclave_config -I$(srcdir)/../../../ -I$(SGXSSLDIR)/include -I$(SGXSDKDIR)/include -I$(SGXSDKDIR)/include/ipp -I$(SGXSDKDIR)/include/tlibc -I$(SGXSDKDIR)/include/libcxx -I$(SGXSDKDIR)/include/stdc++ -I$(SGXSDKDIR)/include/stlport -I$(srcdir)/SoftHSMv2/ -I$(srcdir)/SoftHSMv2/common
+endif
+
+if WITH_P11_KIT
+AM_CPPFLAGS += -I$(P11_KIT_INCLUDE_PATH)
+else
+AM_CPPFLAGS += -I$(srcdir)/SoftHSMv2/pkcs11
 endif
 
 EXTRA_DIST = $(srcdir)/../enclave_config/*        \
@@ -152,7 +158,7 @@ all-local: libp11SgxEnclave.la
 		   ./SoftHSMv2/session_mgr/Session.o                            \
 		   ./SoftHSMv2/session_mgr/SessionManager.o                     \
 		   ./SoftHSMv2/P11Attributes.o                                  \
-		   -m64 -Wall -O2 -D_FORTIFY_SOURCE=2 -Wl,--no-undefined -nostdlib -nodefaultlibs -nostartfiles -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now -pie -L$(SGXSSLDIR)/lib64 -Wl,--whole-archive -lsgx_tsgxssl -Wl,--no-whole-archive -lsgx_tsgxssl_crypto -L$(SGXSDKDIR)/lib64 -Wl,--whole-archive -lsgx_trts -Wl,--no-whole-archive -Wl,--start-group -lsgx_tstdc -lsgx_tcxx -lsgx_tcrypto -lsgx_tservice -lsgx_tprotected_fs -Wl,--end-group -Wl,-Bstatic -Wl,-Bsymbolic -Wl,--no-undefined -Wl,-pie,-eenclave_entry -Wl,--export-dynamic -Wl,--defsym,__ImageBase=0 -Wpragmas -Wl,-soname -Wl,libp11SgxEnclave.so.0 -o .libs/libp11SgxEnclave.so.0.0.0
+		   -m64 -Wall -O2 -D_FORTIFY_SOURCE=2 -Wl,--no-undefined -nostdlib -nodefaultlibs -nostartfiles -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now -pie -L$(SGXSSLDIR)/lib64/cve_2020_0551_load -Wl,--whole-archive -lsgx_tsgxssl -Wl,--no-whole-archive -lsgx_tsgxssl_crypto -L$(SGXSDKDIR)/lib64 -Wl,--whole-archive -lsgx_trts -Wl,--no-whole-archive -Wl,--start-group -lsgx_tstdc -lsgx_tcxx -lsgx_tcrypto -lsgx_tservice -lsgx_tprotected_fs -Wl,--end-group -Wl,-Bstatic -Wl,-Bsymbolic -Wl,--no-undefined -Wl,-pie,-eenclave_entry -Wl,--export-dynamic -Wl,--defsym,__ImageBase=0 -Wpragmas -Wl,-soname -Wl,libp11SgxEnclave.so.0 -o .libs/libp11SgxEnclave.so.0.0.0
 		@$(SGX_SIGN) sign -key $(srcdir)/../enclave_config/p11Enclave_private.pem -enclave ./.libs/libp11SgxEnclave.so.0.0.0 -out ./.libs/libp11SgxEnclave.signed.so -config $(srcdir)/../enclave_config/p11Enclave.config.xml
 		@echo "--------------------libp11SgxEnclave.signed.so built-----------------------------"
 
@@ -166,7 +172,8 @@ uninstall-local:
     rm -f $(prefix)/include/pkcs11t.h               \
     rm -f $(prefix)/include/pkcs11.h                \
     rm -f $(prefix)/include/pkcs11f.h               \
-    rm -f $(prefix)/include/QuoteGeneration.h
+    rm -f $(prefix)/include/QuoteGeneration.h       \
+    rm -f $(prefix)/include/QuoteGenerationDefs.h
 
 clean-local:
 	test -z *.la || rm -rf *.la

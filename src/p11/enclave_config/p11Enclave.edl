@@ -34,10 +34,9 @@ enclave
     // For Linux builds..
     from "sgx_tsgxssl.edl" import *; /* Libraries for OpenSSL use in the enclave */
     from "sgx_tstdc.edl" import *; /* Libraries for OpenSSL use in the enclave */
-    from "sgx_tae_service.edl" import *;
     from "sgx_tprotected_fs.edl" import *;
 
-    include "e_pkcs11t.h"
+    include "cryptoki.h"
 
     include "sgx_key.h"
     include "sgx_key_exchange.h"

@@ -89,7 +89,7 @@
 #ifdef DCAP_SUPPORT
 #include "QuoteGeneration.h"
 #endif
-
+#include "QuoteGenerationDefs.h"
 #include <memory>
 
 class SoftHSM
