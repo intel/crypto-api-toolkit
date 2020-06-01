@@ -2350,4 +2350,104 @@ void SymmetricAlgorithmTests::aesWrapUnwrapTokenObject(CK_MECHANISM_TYPE mechani
 
     C_CloseSession(hSession);
 }
+#ifdef WITH_AES_GCM
+void SymmetricAlgorithmTests::testAesGcmEncryptDecrypt()
+{
+    CK_RV rv;
+    CK_SESSION_HANDLE hSession;
+    const int blockSize(0x10);
+
+    // Just make sure that we finalize any previous tests
+    CRYPTOKI_F_PTR( C_Finalize(NULL_PTR) );
+
+    // Initialize the library and start the test.
+    rv = CRYPTOKI_F_PTR( C_Initialize(NULL_PTR) );
+    CPPUNIT_ASSERT(CKR_OK == rv);
+
+    // Open session
+    rv = CRYPTOKI_F_PTR( C_OpenSession(m_initializedTokenSlotID, CKF_SERIAL_SESSION | CKF_RW_SESSION, NULL_PTR, NULL_PTR, &hSession) );
+    CPPUNIT_ASSERT(CKR_OK == rv);
+
+    // Login USER into the session so we can create a private object
+    rv = CRYPTOKI_F_PTR( C_Login(hSession, CKU_USER, m_userPin1, m_userPin1Length) );
+    CPPUNIT_ASSERT(CKR_OK == rv);
+
+    CK_OBJECT_HANDLE hKey = CK_INVALID_HANDLE;
+
+    rv = generateAesKey(hSession, IN_SESSION, IS_PUBLIC, hKey);
+    CPPUNIT_ASSERT(CKR_OK == rv);
+
+    const CK_MECHANISM_TYPE mechanismType = CKM_AES_GCM;
+    CK_MECHANISM mechanism = { mechanismType, NULL_PTR, 0 };
+    CK_MECHANISM_PTR pMechanism((CK_MECHANISM_PTR)&mechanism);
+
+    CK_BYTE gcmIV[] = {
+        0xCA, 0xFE, 0xBA, 0xBE, 0xFA, 0xCE,
+        0xDB, 0xAD, 0xDE, 0xCA, 0xF8, 0x88
+    };
+
+    CK_BYTE gcmAAD[] = {
+        0xFE, 0xED, 0xFA, 0xCE, 0xDE, 0xAD, 0xBE, 0xEF,
+        0xFE, 0xED, 0xFA, 0xCE, 0xDE, 0xAD, 0xBE, 0xEF,
+        0xAB, 0xAD, 0xDA, 0xD2
+    };
+
+    // C_EncryptInit and C_DecryptInit with pIV NULL and ulIvLen not 0
+    CK_GCM_PARAMS gcmParams =
+    {
+        NULL,
+        sizeof(gcmIV),
+        sizeof(gcmIV)*8,
+        &gcmAAD[0],
+        sizeof(gcmAAD),
+        16*8
+    };
+
+    pMechanism->pParameter = &gcmParams;
+    pMechanism->ulParameterLen = sizeof(gcmParams);
+
+    rv = CRYPTOKI_F_PTR( C_EncryptInit(hSession, pMechanism, hKey) );
+    CPPUNIT_ASSERT(CKR_ARGUMENTS_BAD == rv);
+    rv = CRYPTOKI_F_PTR( C_DecryptInit(hSession, pMechanism, hKey) );
+    CPPUNIT_ASSERT(CKR_ARGUMENTS_BAD == rv);
+
+    // C_EncryptInit and C_DecryptInit with pIV not NULL and ulIvLen 0
+    gcmParams.pIv = &gcmIV[0];
+    gcmParams.ulIvLen = 0;
+    rv = CRYPTOKI_F_PTR( C_EncryptInit(hSession, pMechanism, hKey) );
+    CPPUNIT_ASSERT(CKR_ARGUMENTS_BAD == rv);
+    rv = CRYPTOKI_F_PTR( C_DecryptInit(hSession, pMechanism, hKey) );
+    CPPUNIT_ASSERT(CKR_ARGUMENTS_BAD == rv);
+
+    // C_EncryptInit and C_DecryptInit with pIV NULL and ulIvLen 0
+    gcmParams.pIv = NULL;
+    encryptDecrypt(CKM_AES_GCM, blockSize, hSession, hKey, blockSize*NR_OF_BLOCKS_IN_TEST-1);
+    encryptDecrypt(CKM_AES_GCM, blockSize, hSession, hKey, blockSize*NR_OF_BLOCKS_IN_TEST+1);
+    encryptDecrypt(CKM_AES_GCM, blockSize, hSession, hKey, blockSize*NR_OF_BLOCKS_IN_TEST);
+
+    // C_EncryptInit and C_DecryptInit with pAAD NULL and ulAADLen not 0
+    gcmParams.pIv = &gcmIV[0];
+    gcmParams.ulIvLen = sizeof(gcmIV);
+    gcmParams.pAAD = NULL;
+
+    rv = CRYPTOKI_F_PTR( C_EncryptInit(hSession, pMechanism, hKey) );
+    CPPUNIT_ASSERT(CKR_ARGUMENTS_BAD == rv);
+    rv = CRYPTOKI_F_PTR( C_DecryptInit(hSession, pMechanism, hKey) );
+    CPPUNIT_ASSERT(CKR_ARGUMENTS_BAD == rv);
+
+    // C_EncryptInit and C_DecryptInit with pAAD not NULL and ulAADLen 0
+    gcmParams.pAAD = &gcmAAD[0];
+    gcmParams.ulAADLen = 0;
+    rv = CRYPTOKI_F_PTR( C_EncryptInit(hSession, pMechanism, hKey) );
+    CPPUNIT_ASSERT(CKR_ARGUMENTS_BAD == rv);
+    rv = CRYPTOKI_F_PTR( C_DecryptInit(hSession, pMechanism, hKey) );
+    CPPUNIT_ASSERT(CKR_ARGUMENTS_BAD == rv);
+
+    // C_EncryptInit and C_DecryptInit with pAAD NULL and ulAADLen 0
+    gcmParams.pAAD = NULL;
+    encryptDecrypt(CKM_AES_GCM, blockSize, hSession, hKey, blockSize*NR_OF_BLOCKS_IN_TEST-1);
+    encryptDecrypt(CKM_AES_GCM, blockSize, hSession, hKey, blockSize*NR_OF_BLOCKS_IN_TEST+1);
+    encryptDecrypt(CKM_AES_GCM, blockSize, hSession, hKey, blockSize*NR_OF_BLOCKS_IN_TEST);
+}
+#endif
 #endif

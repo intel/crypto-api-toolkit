@@ -55,6 +55,8 @@
 #endif
 #include <errno.h>
 
+#define MAX_FOPEN_RETRIES 200
+
 enum AttributeKind {
 	akUnknown,
 	akBoolean,
@@ -146,9 +148,21 @@ File::File(std::string inPath, bool forRead /* = true */, bool forWrite /* = fal
 	valid = false;
 
 	stream = sgx_fopen_auto_key(path.c_str(), "rb");
-	std::string fileMode = "";
+    if (!stream && (ENOENT == errno))
+    {
+        for (auto i = 0; i < MAX_FOPEN_RETRIES; ++i)
+        {
+            sgx_fclose(stream);
+            stream = sgx_fopen_auto_key(path.c_str(), "rb");
+            if (stream)
+            {
+                break;
+            }
+        }
+    }
 
-	if (stream != nullptr)
+    std::string fileMode = "";
+    if (stream || (EWOULDBLOCK == errno))
 	{
 		sgx_fclose(stream);
 		fileMode = "rb+";
@@ -158,10 +172,14 @@ File::File(std::string inPath, bool forRead /* = true */, bool forWrite /* = fal
 		fileMode = "wb+";
 	}
 
+    valid = ((stream = sgx_fopen_auto_key(path.c_str(), reinterpret_cast<const char*>(fileMode.c_str()))) != nullptr);
 
+    while (!valid && (EWOULDBLOCK == errno))
+    {
+        sgx_fclose(stream);
+        valid = ((stream = sgx_fopen_auto_key(path.c_str(), reinterpret_cast<const char*>(fileMode.c_str()))) != nullptr);
+    }
 
-
-	valid = ((stream = sgx_fopen_auto_key(path.c_str(), reinterpret_cast<const char*>(fileMode.c_str()))) != nullptr);
 }
 #endif
 
@@ -759,6 +777,13 @@ bool File::truncate()
 #ifdef SGXHSM
 	sgx_fclose(stream);
 	valid = ((stream = sgx_fopen_auto_key(path.c_str(), "wb+")) != nullptr);
+
+    while (!valid && ((EWOULDBLOCK == errno) || (EACCES == errno)))
+    {
+        sgx_fclose(stream);
+        valid = ((stream = sgx_fopen_auto_key(path.c_str(), "wb+")) != nullptr);
+    }
+
 	return valid;
 	#else
 

@@ -2528,10 +2528,42 @@ CK_RV SoftHSM::SymEncryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 				// DEBUG_MSG("GCM mode requires parameters");
 				return CKR_ARGUMENTS_BAD;
 			}
+#ifdef SGXHSM
+            if ((0 != CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen) && (nullptr == CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pIv))
+            {
+                return CKR_ARGUMENTS_BAD;
+            }
+            if ((0 == CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen) && (nullptr != CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pIv))
+            {
+                return CKR_ARGUMENTS_BAD;
+            }
+            if ((0 != CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen) && (nullptr == CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pAAD))
+            {
+                return CKR_ARGUMENTS_BAD;
+            }
+            if ((0 == CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen) && (nullptr != CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pAAD))
+            {
+                return CKR_ARGUMENTS_BAD;
+            }
+#endif
 			iv.resize(CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen);
+#ifdef SGXHSM
+            if ((0 != CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen) && (nullptr != CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pIv))
+            {
+                memcpy_s(&iv[0], CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pIv, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen);
+            }
+#else
             memcpy_s(&iv[0], CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pIv, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen);
+#endif
 			aad.resize(CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen);
+#ifdef SGXHSM
+            if ((0 != CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen) && (nullptr != CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pAAD))
+            {
+                memcpy_s(&aad[0], CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pAAD, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen);
+            }
+#else
             memcpy_s(&aad[0], CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pAAD, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen);
+#endif
 			tagBytes = CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulTagBits;
 			if (tagBytes > 128 || tagBytes % 8 != 0)
 			{
@@ -3297,10 +3329,42 @@ CK_RV SoftHSM::SymDecryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 				// DEBUG_MSG("GCM mode requires parameters");
 				return CKR_ARGUMENTS_BAD;
 			}
+#ifdef SGXHSM
+            if ((0 != CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen) && (nullptr == CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pIv))
+            {
+                return CKR_ARGUMENTS_BAD;
+            }
+            if ((0 == CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen) && (nullptr != CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pIv))
+            {
+                return CKR_ARGUMENTS_BAD;
+            }
+            if ((0 != CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen) && (nullptr == CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pAAD))
+            {
+                return CKR_ARGUMENTS_BAD;
+            }
+            if ((0 == CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen) && (nullptr != CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pAAD))
+            {
+                return CKR_ARGUMENTS_BAD;
+            }
+#endif
 			iv.resize(CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen);
+#ifdef SGXHSM
+            if ((0 != CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen) && (nullptr != CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pIv))
+            {
+                memcpy_s(&iv[0], CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pIv, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen);
+            }
+#else
             memcpy_s(&iv[0], CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pIv, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen);
+#endif
 			aad.resize(CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen);
+#ifdef SGXHSM
+            if ((0 != CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen) && (nullptr != CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pAAD))
+            {
+                memcpy_s(&aad[0], CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pAAD, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen);
+            }
+#else
             memcpy_s(&aad[0], CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pAAD, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen);
+#endif
 			tagBytes = CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulTagBits;
 			if (tagBytes > 128 || tagBytes % 8 != 0)
 			{

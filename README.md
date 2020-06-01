@@ -56,18 +56,19 @@ The common software requirements for building the CTK are listed below. Please r
   ``$ sudo apt-get install dkms libprotobuf10 autoconf libcppunit-dev autotools-dev libc6-dev libtool build-essential``
 
 - Intel(R) SGX software components  
-  -  The SDK, driver and PSW can be downloaded and installed from <a href=https://01.org/intel-softwareguard-extensions/downloads/intel-sgx-linux-2.9-release-version-string-2.9.100.2>Intel SGX Linux 2.9 Release</a> or can be built from the source from https://github.com/intel/linux-sgx.  
+  -  The SDK, driver and PSW can be downloaded and installed from <a href=https://01.org/intel-softwareguard-extensions/downloads/intel-sgx-linux-2.9.1-release>Intel SGX Linux 2.9.1 Release</a> or can be built from the source from https://github.com/intel/linux-sgx
   - Intel(R) SGX SSL - built with All-Loads-Mitigation for CVE-2020-0551  
     Can be built from the source and installed from https://github.com/intel/intel-sgx-ssl. CTK has been validated with Intel(R) SGX SSL built with OpenSSL version 1.1.1d.
   - (For DCAP support) The latest version of DCAP binaries and driver can be downloaded and installed from https://01.org/intel-software-guard-extensions/downloads or built from the source from https://github.com/intel/SGXDataCenterAttestationPrimitives.
 
-> **NOTE** This version of CTK is configured to build with, and validated against Intel SGX SDK v2.9, SGX driver v2.6.0_95eaa6f, DCAP v1.5 and SGXSSL binaries with All-Loads-Mitigation for CVE-2020-0551.
+> **NOTE** This version of CTK is configured to build with, and validated against Intel SGX SDK v2.9.1, SGX driver v2.6.0_95eaa6f, DCAP v1.6 and SGXSSL binaries with All-Loads-Mitigation for CVE-2020-0551.
 
 ## Building the source
 
 ### Build configuration
 -  The enclave is configured to have `DisableDebug` set to 0 in the enclave configuration XML ([src/p11/enclave_config/p11Enclave.config.xml](src/p11/enclave_config/p11Enclave.config.xml)) for the purpose of debug during development and integration. This means that the enclave will be debuggable. For a production enclave, this value must be set to to 1 before building the enclave. Please refer to the section Enclave Project Configurations in the [Intel(R) SGX Developer Reference for Linux* OS](https://download.01.org/intel-sgx/latest/linux-latest/docs/) for more information. Please also note that the provider that loads the enclave needs to be built with `NDEBUG` preprocessor macro that disables the `SGX_DEBUG_FLAG` (will be defined as 0).
 - Based on the default `StackSize` (0x40000) defined in the enclave configuration XML ([src/p11/enclave_config/p11Enclave.config.xml](src/p11/enclave_config/p11Enclave.config.xml)), the maximum data that can be transfered from untrusted to trusted during an OCALL is limited to 180KB. This could limit the number of persistent token objects. Please tune this parameter (`StackSize`) based on the requirements and system capability.
+- The `HeapMaxSize` in the configuration XML is by default set to 0xA00000. Please tune this parameter based on your application's requirements.
 > **NOTE** For platforms with FLC support, the release enclave does not need to be whitelisted. For other platforms, the release enclave will need to be whitelisted. The process of whitelisting and onboarding is detailed in https://software.intel.com/en-us/articles/intel-software-guard-extensions-product-licensing-faq.
 
 ### Preparing the source for the build  

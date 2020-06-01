@@ -68,16 +68,15 @@ CK_RV initialize(CK_VOID_PTR pInitArgs)
 {
     CK_RV rv = CKR_FUNCTION_FAILED;
 
-    if (isInitialized())
-    {
-        return CKR_CRYPTOKI_ALREADY_INITIALIZED;
-        // break;
-    }
-
     rv = checkInitArgs(pInitArgs);
     if (rv != CKR_OK)
     {
         return rv;
+    }
+
+    if (isInitialized() && EnclaveInterface::eIsInitialized(pInitArgs))
+    {
+        return CKR_CRYPTOKI_ALREADY_INITIALIZED;
     }
 
     // I think we need to verify this flow - this is not correct - the tests are failing if this is not forced as CKR_OK;

@@ -46,6 +46,9 @@ class SymmetricAlgorithmTests : public TestsBase
     CPPUNIT_TEST(testAesWrapUnwrap);
 #ifdef SGXHSM
     CPPUNIT_TEST(testAesWrapUnwrapTokenObject);
+#ifdef WITH_AES_GCM
+    CPPUNIT_TEST(testAesGcmEncryptDecrypt);
+#endif
 #endif
     CPPUNIT_TEST(testNullTemplate);
 #if 0 // Unsupported by Crypto API Toolkit
@@ -64,6 +67,9 @@ public:
     void testRsaWrapWithAes();
 #ifdef SGXHSM
     void testAesWrapUnwrapTokenObject();
+#ifdef WITH_AES_GCM
+    void testAesGcmEncryptDecrypt();
+#endif
 #endif
 #if 0 // Unsupported by Crypto API Toolkit
 	void testDesEncryptDecrypt();

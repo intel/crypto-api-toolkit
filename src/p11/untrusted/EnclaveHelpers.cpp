@@ -48,10 +48,8 @@ namespace P11Crypto
     //---------------------------------------------------------------------------------------------
     sgx_status_t EnclaveHelpers::loadSgxEnclave()
     {
-        sgx_launch_token_t token;
-        sgx_status_t       sgxStatus        = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        int                tokenUpdated     = 0;
-        sgx_enclave_id_t   sgxEnclaveId     = mEnclaveInvalidId;
+        sgx_status_t     sgxStatus    = sgx_status_t::SGX_ERROR_UNEXPECTED;
+        sgx_enclave_id_t sgxEnclaveId = mEnclaveInvalidId;
 
         if (isSgxEnclaveLoaded())
         {
@@ -60,14 +58,10 @@ namespace P11Crypto
             return SGX_SUCCESS;
         }
 
-        memset(&token, 0, sizeof(token));
-
-        // There is no need to handle SGX_ERROR_ENCLAVE_LOST here because
-        // for sure this is the first new instance of enclave creation.
         sgxStatus = sgx_create_enclave(enclaveFileName.data(),
                                        SGX_DEBUG_FLAG,
-                                       &token,
-                                       &tokenUpdated,
+                                       NULL,
+                                       NULL,
                                        &sgxEnclaveId,
                                        NULL);
 
@@ -90,6 +84,7 @@ namespace P11Crypto
         }
         else
         {
+            __sync_lock_test_and_set(&mSgxEnclaveLoadedCount, 0);
             sgx_destroy_enclave(sgxEnclaveId);
             setSgxEnclaveId(mEnclaveInvalidId);
         }
