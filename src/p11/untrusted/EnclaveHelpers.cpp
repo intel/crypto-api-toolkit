@@ -65,17 +65,6 @@ namespace P11Crypto
                                        &sgxEnclaveId,
                                        NULL);
 
-#if RELEASE_WHITELISTED_ENCLAVE
-        if (sgx_status_t::SGX_ERROR_SERVICE_INVALID_PRIVILEGE == sgxStatus)
-        {
-            // If error indicates that enclave verification fails due to cert not being
-            // in white list, register the embedded white list cert binary and retry
-            // loading the enclave. Registration is a one-time operation.
-            // Please refer to sgx_register_wl_cert_chain
-            // https://software.intel.com/en-us/sgx-sdk-dev-reference-sgx-register-wl-cert-chain
-            // After registration call sgx_create_enclave
-        }
-#endif
         // Save the SGX enclave ID for later.
         if (sgx_status_t::SGX_SUCCESS == sgxStatus)
         {

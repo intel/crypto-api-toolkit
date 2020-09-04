@@ -666,3 +666,81 @@ void AsymEncryptDecryptTests::testRsaEncryptDecrypt()
     rsaEncryptDecrypt(CKM_RSA_X_509,hSessionRO,hPublicKey,hPrivateKey);
     rsaEncryptDecrypt(CKM_RSA_PKCS_OAEP,hSessionRO,hPublicKey,hPrivateKey);
 }
+
+void AsymEncryptDecryptTests::testNullTemplate()
+{
+    CK_RV rv;
+    CK_SESSION_HANDLE hSession;
+
+    CK_MECHANISM mechanismRsa = { CKM_RSA_PKCS_KEY_PAIR_GEN, NULL_PTR, 0 };
+    CK_OBJECT_HANDLE hPublicKey  = CK_INVALID_HANDLE;
+    CK_OBJECT_HANDLE hPrivateKey = CK_INVALID_HANDLE;
+    CK_ULONG     bits         = 2048;
+    CK_BYTE      pubExp[]     = {0x01, 0x00, 0x01};
+    CK_BYTE      subject[]    = { 0x12, 0x34 };
+    CK_BYTE      idRsa[]      = { 123 };
+    CK_BBOOL     bFalse       = CK_FALSE;
+    CK_BBOOL     bTrue        = CK_TRUE;
+
+    CK_ATTRIBUTE pukAttribs[] = {
+                                    { CKA_TOKEN,           &bFalse,    sizeof(bFalse) },
+                                    { CKA_PRIVATE,         &bFalse,    sizeof(bFalse) },
+                                    { CKA_ENCRYPT,         &bTrue,     sizeof(bTrue) },
+                                    { CKA_VERIFY,          &bTrue,     sizeof(bTrue) },
+                                    { CKA_WRAP,            &bTrue,     sizeof(bTrue) },
+                                    { CKA_MODULUS_BITS,    &bits,      sizeof(bits) },
+                                    { CKA_PUBLIC_EXPONENT, &pubExp[0], sizeof(pubExp) }
+                                };
+
+    CK_ATTRIBUTE prkAttribs[] = {
+                                    { CKA_TOKEN,     &bFalse,     sizeof(bFalse) },
+                                    { CKA_PRIVATE,   &bFalse,     sizeof(bFalse) },
+                                    { CKA_SUBJECT,   &subject[0], sizeof(subject) },
+                                    { CKA_ID,        &idRsa[0],   sizeof(idRsa) },
+                                    { CKA_SENSITIVE, &bTrue,      sizeof(bTrue) },
+                                    { CKA_DECRYPT,   &bTrue,      sizeof(bTrue) },
+                                    { CKA_SIGN,      &bTrue,      sizeof(bTrue) },
+                                    { CKA_UNWRAP,    &bTrue,      sizeof(bTrue) }
+                                 };
+
+    // Just make sure that we finalize any previous tests
+    CRYPTOKI_F_PTR( C_Finalize(NULL_PTR) );
+
+    // Initialize the library and start the test.
+    rv = CRYPTOKI_F_PTR( C_Initialize(NULL_PTR) );
+    CPPUNIT_ASSERT(CKR_OK == rv);
+
+    // Open read-write session
+    rv = CRYPTOKI_F_PTR( C_OpenSession(m_initializedTokenSlotID, CKF_SERIAL_SESSION | CKF_RW_SESSION, NULL_PTR, NULL_PTR, &hSession) );
+    CPPUNIT_ASSERT(CKR_OK == rv);
+
+    // Login USER into the sessions so we can create a private objects
+    rv = CRYPTOKI_F_PTR( C_Login(hSession, CKU_USER, m_userPin1, m_userPin1Length) );
+    CPPUNIT_ASSERT(CKR_OK == rv);
+
+    // Check public key CK_ATTRIBUTE_PTR arguments for NULL_PTR and ulCount more than zero
+    rv = CRYPTOKI_F_PTR( C_GenerateKeyPair(hSession, &mechanismRsa,
+                                           nullptr, 1,
+                                           prkAttribs, sizeof(prkAttribs)/sizeof(CK_ATTRIBUTE),
+                                           &hPublicKey, &hPrivateKey) );
+    CPPUNIT_ASSERT(CKR_ARGUMENTS_BAD == rv);
+
+    // Check private key CK_ATTRIBUTE_PTR arguments for NULL_PTR and ulCount more than zero
+    rv = CRYPTOKI_F_PTR( C_GenerateKeyPair(hSession, &mechanismRsa,
+                                           pukAttribs, sizeof(pukAttribs)/sizeof(CK_ATTRIBUTE),
+                                           nullptr, 1,
+                                           &hPublicKey, &hPrivateKey) );
+    CPPUNIT_ASSERT(CKR_ARGUMENTS_BAD == rv);
+
+    // Log out
+    rv = CRYPTOKI_F_PTR( C_Logout(hSession) );
+    CPPUNIT_ASSERT(CKR_OK == rv);
+
+    // Close Session
+    rv = CRYPTOKI_F_PTR( C_CloseSession(hSession));
+    CPPUNIT_ASSERT(CKR_OK == rv);
+
+    // Finalize
+    CRYPTOKI_F_PTR( C_Finalize(NULL_PTR) );
+    CPPUNIT_ASSERT(CKR_OK == rv);
+}

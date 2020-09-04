@@ -73,16 +73,6 @@
 class AsymmetricKeyPair : public Serialisable
 {
 public:
-	// Base constructors
-	AsymmetricKeyPair() { }
-
-    AsymmetricKeyPair(const AsymmetricKeyPair& /*in*/);
-
-    AsymmetricKeyPair& operator=(const AsymmetricKeyPair&) = delete;
-
-	// Destructor
-	virtual ~AsymmetricKeyPair() { }
-
 	// Return the public key
 	virtual PublicKey* getPublicKey() = 0;
 	virtual const PublicKey* getConstPublicKey() const = 0;

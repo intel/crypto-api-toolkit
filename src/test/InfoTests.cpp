@@ -332,6 +332,8 @@ void InfoTests::testGetMechanismInfo()
 	CPPUNIT_ASSERT(rv == CKR_OK);
 	CPPUNIT_ASSERT(ulMechCount != 0);
     pMechanismList = (CK_MECHANISM_TYPE_PTR)malloc(ulMechCount * sizeof(CK_MECHANISM_TYPE));
+
+    CPPUNIT_ASSERT(nullptr != pMechanismList);
 	rv = CRYPTOKI_F_PTR( C_GetMechanismList(m_initializedTokenSlotID, pMechanismList, &ulMechCount) );
 	CPPUNIT_ASSERT(rv == CKR_OK);
 
@@ -383,6 +385,7 @@ void InfoTests::testGetMechanismListConfig()
 	CPPUNIT_ASSERT_EQUAL((CK_ULONG)2, ulMechCount);
     pMechanismList = (CK_MECHANISM_TYPE_PTR)malloc(ulMechCount * sizeof(CK_MECHANISM_TYPE));
 
+    CPPUNIT_ASSERT(nullptr != pMechanismList);
 	// Get the mechanism list
 	rv = CRYPTOKI_F_PTR( C_GetMechanismList(m_initializedTokenSlotID, pMechanismList, &ulMechCount) );
 	CPPUNIT_ASSERT(rv == CKR_OK);

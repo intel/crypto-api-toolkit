@@ -68,6 +68,16 @@ AC_ARG_ENABLE([dcap],
               ],
               [echo "--enable-dcap option not set. ECDSA quote generation is not enabled"; DCAP_SUPPORT="no"])
 
+AM_CONDITIONAL(WITH_MITIGATION, false)
+
+AC_ARG_ENABLE([mitigation],
+              AC_HELP_STRING([--enable-mitigation], [Enable mitigations for CVE-2020-0551 (LVI) and other vulnerabilities]),
+              [
+              AC_DEFINE([ENABLE_MITIGATION], [], [ENABLE MITIGATION])
+              AM_CONDITIONAL(WITH_MITIGATION, true)
+              ],
+              [echo "--enable-mitigation option not set. Mitigations disabled for CVE-2020-0551 (LVI) and other vulnerabilities"])
+
 AM_CONDITIONAL(WITH_P11_KIT, false)
 
 if test "x$P11KITINCLUDEPATH" != "xno"; then
@@ -95,6 +105,11 @@ AC_ARG_ENABLE([ephemeral-quote],
 
 AS_IF([test "x$EPHEMERAL_QUOTE_SUPPORT" = "xyes"],
       [AC_DEFINE([EPHEMERAL_QUOTE], [], [EPHEMERAL QUOTE])])
+
+AC_ARG_ENABLE([multiprocess-support],
+              AC_HELP_STRING([--disable-multiprocess-support ], [If the token is not expected to be simultaneously accessed for modification by multiple processes (write/update/delete), this flag can give a performance boost.]),
+              [AC_DEFINE([MULTIPROCESS_SUPPORT_DISABLED], [], [MULTIPROCESS SUPPORT DISABLED])],
+              [echo "--disable-multiprocess-support option not set. If the token is not expected to be simultaneously accessed for modification by multiple processes (write/update/delete), this flag can give a performance boost."])
 
 AC_SUBST(SGXSDKDIR, $SGXSDK)
 AC_SUBST(SGXSSLDIR, $SGXSSL)

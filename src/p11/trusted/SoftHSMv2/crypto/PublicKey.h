@@ -71,15 +71,6 @@
 class PublicKey : public Serialisable
 {
 public:
-	// Base constructors
-	PublicKey() { }
-
-    // copy constructor
-    PublicKey(const PublicKey& /*in*/) { }
-
-	// Destructor
-	virtual ~PublicKey() { }
-
 	// Check if it is of the given type
 	virtual bool isOfType(const char* inType) = 0;
 
@@ -88,9 +79,6 @@ public:
 
 	// Get the output length
 	virtual unsigned long getOutputLength() const = 0;
-
-	// Serialisation
-	virtual ByteString serialise() const = 0;
 };
 
 #endif // !_SOFTHSM_V2_PUBLICKEY_H

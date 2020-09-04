@@ -1038,6 +1038,10 @@ void SymmetricAlgorithmTests::testNullTemplate()
 
 	rv = CRYPTOKI_F_PTR( C_GenerateKey(hSession, &mechanism2, NULL_PTR, 0, &hKey) );
 	CPPUNIT_ASSERT(rv == CKR_TEMPLATE_INCOMPLETE);
+
+    // Check CK_ATTRIBUTE_PTR arguments for NULL_PTR and ulCount more than 1
+    rv = CRYPTOKI_F_PTR( C_GenerateKey(hSession, &mechanism2, NULL_PTR, 1, &hKey) );
+    CPPUNIT_ASSERT(CKR_ARGUMENTS_BAD == rv);
 }
 
 #if 0 // Unsupported by Crypto API Toolkit

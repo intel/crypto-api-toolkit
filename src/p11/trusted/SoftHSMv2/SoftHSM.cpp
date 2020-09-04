@@ -124,7 +124,9 @@
 #include <sgx_report.h>
 #include <sgx_utils.h>
 
+#ifdef ENABLE_MITIGATION
 extern "C" void __builtin_ia32_lfence(void);
+#endif
 
 // Initialise the one-and-only instance
 
@@ -419,6 +421,8 @@ SoftHSM::~SoftHSM()
 	if (sessionObjectStore != NULL) delete sessionObjectStore;
 	sessionObjectStore = NULL;
 
+    isInitialised = false;
+
 	resetMutexFactoryCallbacks();
 }
 
@@ -615,6 +619,7 @@ CK_RV SoftHSM::C_Finalize(CK_VOID_PTR pReserved)
 	SecureMemoryRegistry::reset();
 
 	isInitialised = false;
+    supportedMechanisms.clear();
 
 	SoftHSM::reset();
 	return CKR_OK;
@@ -631,7 +636,9 @@ CK_RV SoftHSM::C_GetInfo(CK_INFO_PTR pInfo)
         return CKR_DEVICE_MEMORY;
     }
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	pInfo->cryptokiVersion.major = CRYPTOKI_VERSION_MAJOR;
 	pInfo->cryptokiVersion.minor = CRYPTOKI_VERSION_MINOR;
@@ -668,7 +675,9 @@ CK_RV SoftHSM::C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK
         }
     }
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	return slotManager->getSlotList(objectStore, tokenPresent, pSlotList, pulCount);
 }
@@ -685,7 +694,9 @@ CK_RV SoftHSM::C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
         return CKR_DEVICE_MEMORY;
     }
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	Slot* slot = slotManager->getSlot(slotID);
 	if (slot == NULL)
@@ -716,7 +727,9 @@ CK_RV SoftHSM::C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
         return CKR_DEVICE_MEMORY;
     }
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	Slot* slot = slotManager->getSlot(slotID);
 	if (slot == NULL)
@@ -852,6 +865,7 @@ void SoftHSM::prepareSupportedMechanisms(std::map<std::string, CK_MECHANISM_TYPE
 #endif
     t["CKM_EXPORT_ECDSA_QUOTE_RSA_PUBLIC_KEY"] = CKM_EXPORT_ECDSA_QUOTE_RSA_PUBLIC_KEY;
 
+    supportedMechanisms.clear();
 	for (auto it = t.begin(); it != t.end(); ++it)
 	{
 		supportedMechanisms.push_back(it->second);
@@ -914,7 +928,9 @@ CK_RV SoftHSM::C_GetMechanismList(CK_SLOT_ID slotID, CK_MECHANISM_TYPE_PTR pMech
         }
     }
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	Slot* slot = slotManager->getSlot(slotID);
 	if (slot == NULL)
@@ -974,7 +990,9 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	Slot* slot = slotManager->getSlot(slotID);
 	if (slot == NULL)
@@ -1402,7 +1420,9 @@ CK_RV SoftHSM::C_InitToken(CK_SLOT_ID slotID, CK_UTF8CHAR_PTR pPin, CK_ULONG ulP
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	ByteString soPIN(pPin, ulPinLen);
 
@@ -1434,7 +1454,9 @@ CK_RV SoftHSM::C_InitPIN(CK_SESSION_HANDLE hSession, CK_UTF8CHAR_PTR pPin, CK_UL
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	ByteString userPIN(pPin, ulPinLen);
 
@@ -1463,7 +1485,9 @@ CK_RV SoftHSM::C_SetPIN(CK_SESSION_HANDLE hSession, CK_UTF8CHAR_PTR pOldPin, CK_
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	ByteString oldPIN(pOldPin, ulOldLen);
 	ByteString newPIN(pNewPin, ulNewLen);
@@ -1508,7 +1532,9 @@ CK_RV SoftHSM::C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApp
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	Slot* slot = slotManager->getSlot(slotID);
 
@@ -1581,7 +1607,9 @@ CK_RV SoftHSM::C_GetSessionInfo(CK_SESSION_HANDLE hSession, CK_SESSION_INFO_PTR 
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -1633,7 +1661,9 @@ CK_RV SoftHSM::C_Login(CK_SESSION_HANDLE hSession, CK_USER_TYPE userType, CK_UTF
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	ByteString pin(pPin, ulPinLen);
 
@@ -1711,7 +1741,9 @@ CK_RV SoftHSM::C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemp
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 #ifdef SGXHSM
     if (isRestrictedKeyAttributeValue(pTemplate, ulCount, false))
@@ -1842,7 +1874,9 @@ CK_RV SoftHSM::C_CopyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	*phNewObject = CK_INVALID_HANDLE;
 
@@ -2099,7 +2133,9 @@ CK_RV SoftHSM::C_GetObjectSize(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObj
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -2130,7 +2166,9 @@ CK_RV SoftHSM::C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE 
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 #ifdef SGXHSM
     if (isRestrictedKeyAttributeValue(pTemplate, ulCount, false, hObject))
@@ -2196,7 +2234,9 @@ CK_RV SoftHSM::C_SetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE 
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 #ifdef SGXHSM
     if (isRestrictedKeyAttributeValue(pTemplate, ulCount, true, hObject))
@@ -2270,7 +2310,9 @@ CK_RV SoftHSM::C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pT
         }
     }
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 #ifdef SGXHSM
     for (CK_ULONG i = 0; i < ulCount; i++)
@@ -2304,7 +2346,9 @@ CK_RV SoftHSM::C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR ph
 		}
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
     return FindObjects(hSession, phObject, ulMaxObjectCount, pulObjectCount);
 }
@@ -2719,7 +2763,9 @@ CK_RV SoftHSM::C_EncryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMecha
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 #ifdef SGXHSM
     // Check the key handle.
@@ -2908,7 +2954,9 @@ CK_RV SoftHSM::C_Encrypt(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG
 		}
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -3025,7 +3073,9 @@ CK_RV SoftHSM::C_EncryptUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK
 		}
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -3133,7 +3183,9 @@ CK_RV SoftHSM::C_EncryptFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pEncrypted
 		}
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -3542,7 +3594,9 @@ CK_RV SoftHSM::C_DecryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMecha
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 #ifdef SGXHSM
     // Check the key handle.
@@ -3725,7 +3779,9 @@ CK_RV SoftHSM::C_Decrypt(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pEncryptedData,
 		}
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -3845,7 +3901,9 @@ CK_RV SoftHSM::C_DecryptUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pEncrypte
 		}
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -3952,7 +4010,9 @@ CK_RV SoftHSM::C_DecryptFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_
 		}
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -4134,7 +4194,9 @@ CK_RV SoftHSM::C_DigestUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_
         return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -4943,7 +5005,9 @@ CK_RV SoftHSM::C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanis
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 #ifdef DCAP_SUPPORT
     // Get the session
@@ -5139,7 +5203,9 @@ CK_RV SoftHSM::C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ul
 		}
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -5224,7 +5290,9 @@ CK_RV SoftHSM::C_SignUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_UL
         return CKR_DEVICE_MEMORY;
     }
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -5362,7 +5430,9 @@ CK_RV SoftHSM::C_SignFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, C
 		}
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -6009,7 +6079,9 @@ CK_RV SoftHSM::C_VerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 #ifdef DCAP_SUPPORT
     // Get the session
@@ -6166,7 +6238,9 @@ CK_RV SoftHSM::C_Verify(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG 
 		}
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -6246,7 +6320,9 @@ CK_RV SoftHSM::C_VerifyUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_
         return CKR_DEVICE_MEMORY;
     }
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -6348,7 +6424,9 @@ CK_RV SoftHSM::C_VerifyFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature,
 		}
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -6445,6 +6523,12 @@ CK_RV SoftHSM::C_GenerateKey(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMecha
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
+
+    if (nullptr == pTemplate && 0 != ulCount)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
 	if (phKey == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
     if (!validate_user_check_ptr(phKey, sizeof(CK_OBJECT_HANDLE)))
@@ -6462,7 +6546,9 @@ CK_RV SoftHSM::C_GenerateKey(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMecha
 		return CKR_DEVICE_MEMORY;
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -6627,6 +6713,17 @@ CK_RV SoftHSM::C_GenerateKeyPair
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
+
+    if (nullptr == pPublicKeyTemplate && 0 != ulPublicKeyAttributeCount)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    if (nullptr == pPrivateKeyTemplate && 0 != ulPrivateKeyAttributeCount)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
 	if (phPublicKey == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	if (phPrivateKey == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
@@ -6661,7 +6758,9 @@ CK_RV SoftHSM::C_GenerateKeyPair
 		}
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -7115,7 +7214,9 @@ CK_RV SoftHSM::C_WrapKey
 		}
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -7800,7 +7901,9 @@ CK_RV SoftHSM::C_UnwrapKey
         return CKR_DEVICE_MEMORY;
     }
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -8414,7 +8517,9 @@ CK_RV SoftHSM::C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomD
         }
 	}
 
-	__builtin_ia32_lfence();
+#ifdef ENABLE_MITIGATION
+    __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);

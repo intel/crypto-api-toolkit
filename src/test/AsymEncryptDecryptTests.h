@@ -76,6 +76,7 @@ class AsymEncryptDecryptTests : public TestsBase
 
 public:
 	void testRsaEncryptDecrypt();
+    void testNullTemplate();
 
 protected:
 	CK_RV generateRsaKeyPair(CK_SESSION_HANDLE hSession, CK_BBOOL bTokenPuk, CK_BBOOL bPrivatePuk, CK_BBOOL bTokenPrk, CK_BBOOL bPrivatePrk, CK_OBJECT_HANDLE &hPuk, CK_OBJECT_HANDLE &hPrk);

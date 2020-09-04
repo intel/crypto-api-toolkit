@@ -46,6 +46,36 @@ dist-hook:
 
 SUBDIRS = src
 
+SGXSSL_TLIB = sgx_tsgxssl
+SGXSSL_TCRYPTO = sgx_tsgxssl_crypto
+SGXSSL_ULIB = sgx_usgxssl
+
+BUILT_SOURCES = PREPARE_SGX_SSL
+PREPARE_SGXSSL = src/dep_check/sgxssl/prepare_sgxssl.sh
+CHECK_OPENSSL_VERSION = src/dep_check/sgxssl/check_openssl_version.sh
+
+if WITH_MITIGATION
+SGXSSLLIBDIR = $(SGXSSLDIR)/lib64/cve_2020_0551_load
+TARGET = all
+else
+SGXSSLLIBDIR = $(SGXSSLDIR)/lib64
+endif
+
+PREPARE_SGX_SSL:
+	chmod 755 $(PREPARE_SGXSSL)
+	chmod 755 $(CHECK_OPENSSL_VERSION)
+	test -f $(SGXSSLLIBDIR)/lib$(SGXSSL_TCRYPTO).a && test -f $(SGXSSLLIBDIR)/lib$(SGXSSL_TLIB).a && test -f $(SGXSSLDIR)/lib64/lib$(SGXSSL_ULIB).a  && ./$(CHECK_OPENSSL_VERSION) $(SGXSSLDIR) $(SGXSSLLIBDIR) $(SGXSDKDIR) $ || ./$(PREPARE_SGXSSL) $(SGXSSLDIR) $(TARGET)
+
+clean-local:
+	test -z src/dep_check/sgxssl/sgxssl || rm -rf src/dep_check/sgxssl/sgxssl
+	rm -f src/dep_check/sgxssl/OSSLVersionEnclave/OSSLVersion
+	rm -f src/dep_check/sgxssl/OSSLVersionEnclave/enclave.so
+	rm -f src/dep_check/sgxssl/OSSLVersionEnclave/enclave.signed.so
+	rm -f src/dep_check/sgxssl/OSSLVersionEnclave/App/*.o
+	rm -f src/dep_check/sgxssl/OSSLVersionEnclave/App/Enclave_u.*
+	rm -f src/dep_check/sgxssl/OSSLVersionEnclave/Enclave/*.o
+	rm -f src/dep_check/sgxssl/OSSLVersionEnclave/Enclave/Enclave_t.*
+
 install-exec-local:
 	mkdir -p $(CATKTOKENPATH)/tokens
 	chmod -R 1777 $(CATKTOKENPATH)/tokens

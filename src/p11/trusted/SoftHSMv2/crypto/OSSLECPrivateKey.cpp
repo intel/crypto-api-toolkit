@@ -81,10 +81,13 @@ OSSLECPrivateKey::OSSLECPrivateKey(const EC_KEY* inECKEY)
 {
 	eckey = EC_KEY_new();
 
-	// For PKCS#8 encoding
-	EC_KEY_set_enc_flags(eckey, EC_PKEY_NO_PUBKEY);
+    if (eckey)
+    {
+        // For PKCS#8 encoding
+        EC_KEY_set_enc_flags(eckey, EC_PKEY_NO_PUBKEY);
 
-	setFromOSSL(inECKEY);
+        setFromOSSL(inECKEY);
+    }
 }
 
 // Destructor

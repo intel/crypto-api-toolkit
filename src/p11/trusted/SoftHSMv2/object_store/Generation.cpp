@@ -118,6 +118,7 @@ bool Generation::sync(File &objectFile)
 // Check if the target was updated
 bool Generation::wasUpdated()
 {
+#ifndef MULTIPROCESS_SUPPORT_DISABLED
 	if (isToken)
 	{
 		MutexLocker lock(genMutex);
@@ -166,6 +167,9 @@ bool Generation::wasUpdated()
 
 		return (onDisk != currentValue);
 	}
+#else
+    return false;
+#endif
 }
 
 // Update

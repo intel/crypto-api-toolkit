@@ -115,6 +115,12 @@ bool OSSLEDDSA::sign(PrivateKey* privateKey, const ByteString& dataToSign,
 	signature.resize(len);
 	memset(&signature[0], 0, len);
 	EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+
+    if (nullptr == ctx)
+    {
+        return false;
+    }
+
 	if (!EVP_DigestSignInit(ctx, NULL, NULL, NULL, pkey))
 	{
 		// ERROR_MSG("EDDSA sign init failed (0x%08X)", ERR_get_error());
@@ -196,6 +202,12 @@ bool OSSLEDDSA::verify(PublicKey* publicKey, const ByteString& originalData,
 		return false;
 	}
 	EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+
+    if (nullptr == ctx)
+    {
+        return false;
+    }
+
 	if (!EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, pkey))
 	{
 		// ERROR_MSG("EDDSA verify init failed (0x%08X)", ERR_get_error());

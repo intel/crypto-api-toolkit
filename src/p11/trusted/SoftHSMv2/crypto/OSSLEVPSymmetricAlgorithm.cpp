@@ -122,7 +122,10 @@ void OSSLEVPSymmetricAlgorithm::counterBitsInit(const ByteString& iv, size_t cou
 		BN_mul_word(counter, getBlockSize());
 		maximumBytes = counter;
 		counterBytes = BN_new();
-		BN_zero(counterBytes);
+        if (nullptr != counterBytes)
+        {
+            BN_zero(counterBytes);
+        }
 	}
 }
 

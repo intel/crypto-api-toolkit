@@ -46,6 +46,12 @@ else
 AM_CPPFLAGS += -I$(srcdir)/SoftHSMv2/pkcs11
 endif
 
+if WITH_MITIGATION
+SGXSSLLIBDIR = $(SGXSSLDIR)/lib64/cve_2020_0551_load
+else
+SGXSSLLIBDIR = $(SGXSSLDIR)/lib64
+endif
+
 EXTRA_DIST = $(srcdir)/../enclave_config/*        \
              $(srcdir)/*.h                        \
              $(srcdir)/SoftHSMv2/*.h              \
@@ -158,7 +164,7 @@ all-local: libp11SgxEnclave.la
 		   ./SoftHSMv2/session_mgr/Session.o                            \
 		   ./SoftHSMv2/session_mgr/SessionManager.o                     \
 		   ./SoftHSMv2/P11Attributes.o                                  \
-		   -m64 -Wall -O2 -D_FORTIFY_SOURCE=2 -Wl,--no-undefined -nostdlib -nodefaultlibs -nostartfiles -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now -pie -L$(SGXSSLDIR)/lib64/cve_2020_0551_load -Wl,--whole-archive -lsgx_tsgxssl -Wl,--no-whole-archive -lsgx_tsgxssl_crypto -L$(SGXSDKDIR)/lib64 -Wl,--whole-archive -lsgx_trts -Wl,--no-whole-archive -Wl,--start-group -lsgx_tstdc -lsgx_tcxx -lsgx_tcrypto -lsgx_tservice -lsgx_tprotected_fs -Wl,--end-group -Wl,-Bstatic -Wl,-Bsymbolic -Wl,--no-undefined -Wl,-pie,-eenclave_entry -Wl,--export-dynamic -Wl,--defsym,__ImageBase=0 -Wpragmas -Wl,-soname -Wl,libp11SgxEnclave.so.0 -o .libs/libp11SgxEnclave.so.0.0.0
+		   -m64 -Wall -O2 -D_FORTIFY_SOURCE=2 -Wl,--no-undefined -nostdlib -nodefaultlibs -nostartfiles -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now -pie -L$(SGXSSLLIBDIR) -Wl,--whole-archive -lsgx_tsgxssl -Wl,--no-whole-archive -lsgx_tsgxssl_crypto -L$(SGXSDKDIR)/lib64 -Wl,--whole-archive -lsgx_trts -Wl,--no-whole-archive -Wl,--start-group -lsgx_tstdc -lsgx_tcxx -lsgx_tcrypto -lsgx_tservice -lsgx_tprotected_fs -Wl,--end-group -Wl,-Bstatic -Wl,-Bsymbolic -Wl,--no-undefined -Wl,-pie,-eenclave_entry -Wl,--export-dynamic -Wl,--defsym,__ImageBase=0 -Wpragmas -Wl,-soname -Wl,libp11SgxEnclave.so.0 -o .libs/libp11SgxEnclave.so.0.0.0
 		@$(SGX_SIGN) sign -key $(srcdir)/../enclave_config/p11Enclave_private.pem -enclave ./.libs/libp11SgxEnclave.so.0.0.0 -out ./.libs/libp11SgxEnclave.signed.so -config $(srcdir)/../enclave_config/p11Enclave.config.xml
 		@echo "--------------------libp11SgxEnclave.signed.so built-----------------------------"
 

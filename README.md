@@ -56,20 +56,18 @@ The common software requirements for building the CTK are listed below. Please r
   ``$ sudo apt-get install dkms libprotobuf10 autoconf libcppunit-dev autotools-dev libc6-dev libtool build-essential``
 
 - Intel(R) SGX software components  
-  -  The SDK, driver and PSW can be downloaded and installed from <a href=https://01.org/intel-softwareguard-extensions/downloads/intel-sgx-linux-2.9.1-release>Intel SGX Linux 2.9.1 Release</a> or can be built from the source from https://github.com/intel/linux-sgx
-  - Intel(R) SGX SSL - built with All-Loads-Mitigation for CVE-2020-0551  
-    Can be built from the source and installed from https://github.com/intel/intel-sgx-ssl. CTK has been validated with Intel(R) SGX SSL built with OpenSSL version 1.1.1d.
+  -  The SDK, driver and PSW can be downloaded and installed from <a href=https://01.org/intel-softwareguard-extensions/downloads/intel-sgx-linux-2.11-release>Intel SGX Linux 2.11 Release</a> or can be built from the source from https://github.com/intel/linux-sgx.
+  - Intel(R) SGX SSL - The current release of CTK automatically builds and installs Intel(R) SGX SSL with OpenSSL version 1.1.1g if not installed already. Alternatively, it can be built from the source and installed from https://github.com/intel/intel-sgx-ssl. CTK has been validated with Intel(R) SGX SSL built with OpenSSL version 1.1.1g without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
   - (For DCAP support) The latest version of DCAP binaries and driver can be downloaded and installed from https://01.org/intel-software-guard-extensions/downloads or built from the source from https://github.com/intel/SGXDataCenterAttestationPrimitives.
 
-> **NOTE** This version of CTK is configured to build with, and validated against Intel SGX SDK v2.9.1, SGX driver v2.6.0_95eaa6f, DCAP v1.6 and SGXSSL binaries with All-Loads-Mitigation for CVE-2020-0551.
+> **NOTE** This version of CTK is configured to build with, and validated against Intel SGX SDK v2.11, SGX driver v2.6.0_b0a445b, DCAP v1.8 and SGXSSL binaries without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
 
 ## Building the source
 
 ### Build configuration
 -  The enclave is configured to have `DisableDebug` set to 0 in the enclave configuration XML ([src/p11/enclave_config/p11Enclave.config.xml](src/p11/enclave_config/p11Enclave.config.xml)) for the purpose of debug during development and integration. This means that the enclave will be debuggable. For a production enclave, this value must be set to to 1 before building the enclave. Please refer to the section Enclave Project Configurations in the [Intel(R) SGX Developer Reference for Linux* OS](https://download.01.org/intel-sgx/latest/linux-latest/docs/) for more information. Please also note that the provider that loads the enclave needs to be built with `NDEBUG` preprocessor macro that disables the `SGX_DEBUG_FLAG` (will be defined as 0).
 - Based on the default `StackSize` (0x40000) defined in the enclave configuration XML ([src/p11/enclave_config/p11Enclave.config.xml](src/p11/enclave_config/p11Enclave.config.xml)), the maximum data that can be transfered from untrusted to trusted during an OCALL is limited to 180KB. This could limit the number of persistent token objects. Please tune this parameter (`StackSize`) based on the requirements and system capability.
-- The `HeapMaxSize` in the configuration XML is by default set to 0xA00000. Please tune this parameter based on your application's requirements.
-> **NOTE** For platforms with FLC support, the release enclave does not need to be whitelisted. For other platforms, the release enclave will need to be whitelisted. The process of whitelisting and onboarding is detailed in https://software.intel.com/en-us/articles/intel-software-guard-extensions-product-licensing-faq.
+> **NOTE** Please go through https://github.com/intel/linux-sgx/blob/master/psw/ae/ref_le/ref_le.md to learn about whitelisting the release enclave.
 
 ### Preparing the source for the build  
 After downloading the souce, run ``sh autogen.sh``
@@ -91,6 +89,8 @@ The options that ``configure`` supports can be obtained by running ``./configure
 |--enable-dcap | Build with DCAP support | Build without DCAP support  |
 |--enable-ephemeral-quote | Destroy the key used for quote generation after one unwrap | Don't destroy |
 |--with-p11-kit-path | p11-kit include directory path | Build without p11-kit, using PKCS11 headers from CTK |
+|--enable-mitigation | Enable mitigations for CVE-2020-0551 (LVI) and other vulnerabilities | Mitigations disabled for CVE-2020-0551 (LVI) and other vulnerabilities |
+|--disable-multiprocess-support | If the token is not expected to be simultaneously accessed for modification by multiple processes (write/update/delete), this flag can give a performance boost. | The token and the objects are allowed to be modified (write/update/delete) by multiple processes simultaneously.
 
 ### Compiling
 ``$ make``

@@ -1513,7 +1513,6 @@ void ObjectTests::testFindObjects()
 	CPPUNIT_ASSERT(4 == ulObjectCount);
 	rv = CRYPTOKI_F_PTR( C_FindObjectsFinal(hSessionRO) );
 
-
 	rv = CRYPTOKI_F_PTR( C_Logout(hSessionRO) );
 	CPPUNIT_ASSERT(rv == CKR_OK);
 
