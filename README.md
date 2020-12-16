@@ -56,11 +56,11 @@ The common software requirements for building the CTK are listed below. Please r
   ``$ sudo apt-get install dkms libprotobuf10 autoconf libcppunit-dev autotools-dev libc6-dev libtool build-essential``
 
 - Intel(R) SGX software components  
-  -  The SDK, driver and PSW can be downloaded and installed from <a href=https://01.org/intel-softwareguard-extensions/downloads/intel-sgx-linux-2.11-release>Intel SGX Linux 2.11 Release</a> or can be built from the source from https://github.com/intel/linux-sgx.
+  -  The SDK, driver and PSW can be downloaded and installed from <a href=https://01.org/intel-softwareguard-extensions/downloads/intel-sgx-linux-2.12-release>Intel SGX Linux 2.12 Release</a> or can be built from the source from https://github.com/intel/linux-sgx.
   - Intel(R) SGX SSL - The current release of CTK automatically builds and installs Intel(R) SGX SSL with OpenSSL version 1.1.1g if not installed already. Alternatively, it can be built from the source and installed from https://github.com/intel/intel-sgx-ssl. CTK has been validated with Intel(R) SGX SSL built with OpenSSL version 1.1.1g without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
   - (For DCAP support) The latest version of DCAP binaries and driver can be downloaded and installed from https://01.org/intel-software-guard-extensions/downloads or built from the source from https://github.com/intel/SGXDataCenterAttestationPrimitives.
 
-> **NOTE** This version of CTK is configured to build with, and validated against Intel SGX SDK v2.11, SGX driver v2.6.0_b0a445b, DCAP v1.8 and SGXSSL binaries without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
+> **NOTE** This version of CTK is configured to build with, and validated against Intel SGX SDK v2.12, SGX driver v2.11.0_4505f07, DCAP v1.9 and SGXSSL binaries without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
 
 ## Building the source
 

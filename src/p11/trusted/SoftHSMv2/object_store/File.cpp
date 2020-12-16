@@ -174,12 +174,26 @@ File::File(std::string inPath, bool forRead /* = true */, bool forWrite /* = fal
 
     valid = ((stream = sgx_fopen_auto_key(path.c_str(), reinterpret_cast<const char*>(fileMode.c_str()))) != nullptr);
 
-    while (!valid && (EWOULDBLOCK == errno))
+    while (!valid && ((EWOULDBLOCK == errno) || (ENOENT == errno)))
     {
         sgx_fclose(stream);
         valid = ((stream = sgx_fopen_auto_key(path.c_str(), reinterpret_cast<const char*>(fileMode.c_str()))) != nullptr);
     }
 
+    // If file is empty try to read it again. File opened in write mode is empty, so ignore it.
+    if (!fileMode.compare("rb+"))
+    {
+        for (auto i = 0; i < MAX_FOPEN_RETRIES && isEmpty(); i++)
+        {
+            sgx_fclose(stream);
+            valid = ((stream = sgx_fopen_auto_key(path.c_str(), reinterpret_cast<const char*>(fileMode.c_str()))) != nullptr);
+            while (!valid && ((EWOULDBLOCK == errno) || (ENOENT == errno)))
+            {
+                sgx_fclose(stream);
+                valid = ((stream = sgx_fopen_auto_key(path.c_str(), reinterpret_cast<const char*>(fileMode.c_str()))) != nullptr);
+            }
+        }
+    }
 }
 #endif
 

@@ -87,6 +87,7 @@
 #include <sys/stat.h>
 #endif
 
+#define MAX_OCALL_REFRESH_RETRIES 5
 
 // Constructor
 Directory::Directory(std::string inPath)
@@ -260,6 +261,7 @@ bool Directory::refresh()
     uint32_t        filesSize = 0;
     uint32_t        subDirsRequiredSize = 0;
     uint32_t        filesRequiredSize = 0;
+    uint32_t        numRetries = 0;
     size_t          rv = CKR_OK;      
     std::string     subDirsString;
     std::string     filesString;
@@ -271,7 +273,10 @@ bool Directory::refresh()
 
     if (SGX_SUCCESS == sgxStatus)
     {
-        if (CKR_BUFFER_TOO_SMALL == rv)
+        numRetries = 0;
+        while ((CKR_BUFFER_TOO_SMALL == rv) &&
+               (std::string::npos == filesString.find(TOKEN_OBJECT)) &&
+               (numRetries < MAX_OCALL_REFRESH_RETRIES))
         {
             if (subDirsRequiredSize)
             {
@@ -288,8 +293,9 @@ bool Directory::refresh()
             sgxStatus = ocall_refresh(&rv, path.c_str(),
                                       const_cast<char*>(subDirsString.data()), subDirsSize, &subDirsRequiredSize,
                                       const_cast<char*>(filesString.data()), filesSize, &filesRequiredSize);
+            numRetries++;
         }
-        else if (rv != CKR_OK)
+        if (CKR_OK != rv)
         {
             return false;
         }

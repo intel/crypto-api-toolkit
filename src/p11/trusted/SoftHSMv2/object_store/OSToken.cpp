@@ -87,7 +87,11 @@ OSToken::OSToken(const std::string inTokenPath)
 
 	tokenDir = new Directory(tokenPath);
 	gen = Generation::create(tokenPath + OS_PATHSEP + "generation", true);
-	tokenObject = new ObjectFile(this, tokenPath + OS_PATHSEP + "token.object", tokenPath + OS_PATHSEP + "token.lock");
+    tokenObject = new ObjectFile(this, tokenPath + OS_PATHSEP + "token.object"
+#ifndef SGXHSM
+                                 , tokenPath + OS_PATHSEP + "token.lock"
+#endif
+                                );
 	tokenMutex = MutexFactory::i()->getMutex();
 	valid = (gen != NULL) && (tokenMutex != NULL) && tokenDir->isValid() && tokenObject->valid;
 
@@ -115,7 +119,11 @@ OSToken::OSToken(const std::string inTokenPath)
 	}
 
 	// Create the token object
-	ObjectFile tokenObject(NULL, basePath + OS_PATHSEP + tokenDir + OS_PATHSEP + "token.object", basePath + OS_PATHSEP + tokenDir + OS_PATHSEP + "token.lock", true);
+    ObjectFile tokenObject(NULL, basePath + OS_PATHSEP + tokenDir + OS_PATHSEP + "token.object",
+#ifndef SGXHSM
+                           basePath + OS_PATHSEP + tokenDir + OS_PATHSEP + "token.lock",
+#endif
+                           true);
 
 	if (!tokenObject.valid)
 	{
@@ -147,7 +155,9 @@ OSToken::OSToken(const std::string inTokenPath)
 		// ERROR_MSG("Failed to set the token attributes");
 
 		baseDir.remove(tokenDir + OS_PATHSEP + "token.object");
+#ifndef SGXHSM
 		baseDir.remove(tokenDir + OS_PATHSEP + "token.lock");
+#endif
 		baseDir.rmdir(tokenDir);
 
 		return NULL;
@@ -376,10 +386,16 @@ OSObject* OSToken::createObject()
 	// Generate a name for the object
 	std::string objectUUID = UUID::newUUID();
 	std::string objectPath = tokenPath + OS_PATHSEP + objectUUID + ".object";
+#ifndef SGXHSM
 	std::string lockPath = tokenPath + OS_PATHSEP + objectUUID + ".lock";
+#endif
 
 	// Create the new object file
-	ObjectFile* newObject = new ObjectFile(this, objectPath, lockPath, true);
+    ObjectFile* newObject = new ObjectFile(this, objectPath,
+#ifndef SGXHSM
+                                           lockPath,
+#endif
+                                           true);
 
 	if (!newObject->valid)
 	{
@@ -442,6 +458,7 @@ bool OSToken::deleteObject(OSObject* object)
 		return false;
 	}
 
+#ifndef SGXHSM
 	// Retrieve the filename of the lock
 	std::string lockFilename = fileObject->getLockname();
 
@@ -452,6 +469,7 @@ bool OSToken::deleteObject(OSObject* object)
 
 		return false;
 	}
+#endif
 
 	objects.erase(object);
 
@@ -559,6 +577,7 @@ bool OSToken::resetToken(const ByteString& label)
 			return false;
 		}
 
+#ifndef SGXHSM
 		// Retrieve the filename of the lock
 		std::string lockFilename = fileObject->getLockname();
 
@@ -569,6 +588,7 @@ bool OSToken::resetToken(const ByteString& label)
 
 			return false;
 		}
+#endif
 
 		objects.erase(*i);
 
@@ -701,11 +721,17 @@ bool OSToken::index(bool isFirstTime /* = false */)
 			continue;
 		}
 
+#ifndef SGXHSM
 		std::string lockName(*i);
 		lockName.replace(lockName.find_last_of('.'), std::string::npos, ".lock");
+#endif
 
 		// Create a new token object for the added file
-		ObjectFile* newObject = new ObjectFile(this, tokenPath + OS_PATHSEP + *i, tokenPath + OS_PATHSEP + lockName);
+        ObjectFile* newObject = new ObjectFile(this, tokenPath + OS_PATHSEP + *i
+#ifndef SGXHSM
+                                               , tokenPath + OS_PATHSEP + lockName
+#endif
+                                               );
 
 		// Add the object, even invalid ones.
 		// This is so the we can read the attributes once

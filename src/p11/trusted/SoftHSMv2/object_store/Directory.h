@@ -69,6 +69,8 @@
 #include <string>
 #include <vector>
 
+#define TOKEN_OBJECT "token.object"
+
 class Directory
 {
 public:

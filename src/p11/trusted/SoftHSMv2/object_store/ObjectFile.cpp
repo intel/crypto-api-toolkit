@@ -75,7 +75,11 @@
 #define MECHSET_ATTR			0x5
 
 // Constructor
-ObjectFile::ObjectFile(OSToken* parent, std::string inPath, std::string inLockpath, bool isNew /* = false */)
+ObjectFile::ObjectFile(OSToken* parent, std::string inPath,
+#ifndef SGXHSM
+                       std::string inLockpath,
+#endif
+                       bool isNew /* = false */)
 {
 	path = inPath;
 	gen = Generation::create(path);
@@ -83,8 +87,10 @@ ObjectFile::ObjectFile(OSToken* parent, std::string inPath, std::string inLockpa
 	valid = (gen != NULL) && (objectMutex != NULL);
 	token = parent;
 	inTransaction = false;
+#ifndef SGXHSM
 	transactionLockFile = NULL;
 	lockpath = inLockpath;
+#endif
 
 	if (!valid) return;
 
@@ -714,7 +720,9 @@ void ObjectFile::store(bool isCommit /* = false */)
 
 	if (!isCommit) {
 		MutexLocker lock(objectMutex);
+#ifndef SGXHSM
 		File lockFile(lockpath, false, true, true);
+#endif
 
 		if (!writeAttributes(objectFile))
 		{
@@ -771,6 +779,7 @@ std::string ObjectFile::getFilename() const
 	}
 }
 
+#ifndef SGXHSM
 // Returns the file name of the lock
 std::string ObjectFile::getLockname() const
 {
@@ -784,6 +793,7 @@ std::string ObjectFile::getLockname() const
 		return lockpath;
 	}
 }
+#endif
 
 // Start an attribute set transaction; this method is used when - for
 // example - a key is generated and all its attributes need to be
@@ -799,6 +809,7 @@ bool ObjectFile::startTransaction(Access)
 		return false;
 	}
 
+#ifndef SGXHSM
 	transactionLockFile = new File(lockpath, false, true, true);
 
 	if (!transactionLockFile->isValid() || !transactionLockFile->lock())
@@ -810,6 +821,7 @@ bool ObjectFile::startTransaction(Access)
 
 		return false;
 	}
+#endif
 
 	inTransaction = true;
 
@@ -826,12 +838,14 @@ bool ObjectFile::commitTransaction()
 		return false;
 	}
 
+#ifndef SGXHSM
 	if (transactionLockFile == NULL)
 	{
 		// ERROR_MSG("Transaction lock file instance invalid!");
 
 		return false;
 	}
+#endif
 
 	// Special store case
 	store(true);
@@ -841,10 +855,12 @@ bool ObjectFile::commitTransaction()
 		return false;
 	}
 
+#ifndef SGXHSM
 	transactionLockFile->unlock();
 
 	delete transactionLockFile;
 	transactionLockFile = NULL;
+#endif
 	inTransaction = false;
 
 	return true;
@@ -861,6 +877,7 @@ bool ObjectFile::abortTransaction()
 			return false;
 		}
 
+#ifndef SGXHSM
 		if (transactionLockFile == NULL)
 		{
 			// ERROR_MSG("Transaction lock file instance invalid!");
@@ -872,6 +889,7 @@ bool ObjectFile::abortTransaction()
 
 		delete transactionLockFile;
 		transactionLockFile = NULL;
+#endif
 		inTransaction = false;
 	}
 

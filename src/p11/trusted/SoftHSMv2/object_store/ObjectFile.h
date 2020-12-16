@@ -83,7 +83,11 @@ class ObjectFile : public OSObject
 {
 public:
 	// Constructor
-	ObjectFile(OSToken* parent, const std::string inPath, const std::string inLockpath, bool isNew = false);
+    ObjectFile(OSToken* parent, const std::string inPath,
+#ifndef SGXHSM
+               const std::string inLockpath,
+#endif
+               bool isNew = false);
 
     ObjectFile(const ObjectFile&) = delete;
 
@@ -121,8 +125,10 @@ public:
 	// Returns the file name of the object
 	std::string getFilename() const;
 
+#ifndef SGXHSM
 	// Returns the file name of the lock
 	std::string getLockname() const;
+#endif
 
 	// Start an attribute set transaction; this method is used when - for
 	// example - a key is generated and all its attributes need to be
@@ -181,8 +187,10 @@ private:
 
 	// Is the object undergoing an attribute transaction?
 	bool inTransaction;
+#ifndef SGXHSM
 	File* transactionLockFile;
 	std::string lockpath;
+#endif
 };
 
 #endif // !_SOFTHSM_V2_OBJECTFILE_H
