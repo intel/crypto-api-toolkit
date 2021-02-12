@@ -56,11 +56,11 @@ The common software requirements for building the CTK are listed below. Please r
   ``$ sudo apt-get install dkms libprotobuf10 autoconf libcppunit-dev autotools-dev libc6-dev libtool build-essential``
 
 - Intel(R) SGX software components  
-  -  The SDK, driver and PSW can be downloaded and installed from <a href=https://01.org/intel-softwareguard-extensions/downloads/intel-sgx-linux-2.12-release>Intel SGX Linux 2.12 Release</a> or can be built from the source from https://github.com/intel/linux-sgx.
-  - Intel(R) SGX SSL - The current release of CTK automatically builds and installs Intel(R) SGX SSL with OpenSSL version 1.1.1g if not installed already. Alternatively, it can be built from the source and installed from https://github.com/intel/intel-sgx-ssl. CTK has been validated with Intel(R) SGX SSL built with OpenSSL version 1.1.1g without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
+  -  The SDK, driver and PSW can be downloaded and installed from <a href=https://01.org/intel-softwareguard-extensions/downloads/intel-sgx-linux-2.13-release>Intel SGX Linux 2.13 Release</a> or can be built from the source from https://github.com/intel/linux-sgx.
+  - Intel(R) SGX SSL - The current release of CTK automatically builds and installs Intel(R) SGX SSL with OpenSSL version 1.1.1i if not installed already. Alternatively, it can be built from the source and installed from https://github.com/intel/intel-sgx-ssl. CTK has been validated with Intel(R) SGX SSL built with OpenSSL version 1.1.1i without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
   - (For DCAP support) The latest version of DCAP binaries and driver can be downloaded and installed from https://01.org/intel-software-guard-extensions/downloads or built from the source from https://github.com/intel/SGXDataCenterAttestationPrimitives.
 
-> **NOTE** This version of CTK is configured to build with, and validated against Intel SGX SDK v2.12, SGX driver v2.11.0_4505f07, DCAP v1.9 and SGXSSL binaries without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
+> **NOTE** This version of CTK is configured to build with, and validated against Intel SGX SDK v2.13, SGX driver v2.11.0_0373e2e, DCAP v1.10 and SGXSSL binaries without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
 
 ## Building the source
 
@@ -197,8 +197,10 @@ After performing the initialization (load library, initialize and opening the se
 ```cpp
 typedef struct CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS {
     CK_LONG qlPolicy;
+    CK_BYTE nonce[NONCE_LENGTH];
 } CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS;
 ```
+> **NOTE**: NONCE_LENGTH is defined in [src/p11/trusted/SoftHSMv2/common/QuoteGenerationDefs.h](src/p11/trusted/SoftHSMv2/common/QuoteGenerationDefs.h), set as 16 bytes (default) and can be expanded upto 256 bytes based on the requirement.
 
 2. The application calls `C_WrapKey` with the mechanism details, the object handle of the key to be exported and passes a `NULL_PTR` for the `hWrappingKey` and destination buffer.
 3. If the key handle is valid, the enclave returns the size of the destination buffer required to hold the exported public key and quote which is the total size of the actual public key buffer and `sizeof(CK_RSA_PUBLIC_KEY_PARAMS)` and the size of the quote itself. The quote is of the format `sgx_quote_t` and contains the hash of the public key and the quote generated based on this.

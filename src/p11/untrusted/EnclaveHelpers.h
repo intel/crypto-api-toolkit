@@ -29,6 +29,33 @@
  *
  */
 
+ /*
+ * Copyright (c) 2010 SURFnet bv
+ * Copyright (c) 2010 .SE (The Internet Infrastructure Foundation)
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+ * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
+ * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
 #ifndef ENCLAVE_HELPERS_H
 #define ENCLAVE_HELPERS_H
 
@@ -39,6 +66,7 @@
 #include <sgx_urts.h>
 #include <sgx_error.h>
 #include <map>
+#include <unistd.h>
 
 #include "p11Enclave_u.h"
 #include "cryptoki.h"
@@ -98,6 +126,17 @@ namespace P11Crypto
         */
         sgx_status_t unloadSgxEnclave();
 
+        /*
+        * Detects fork.
+        * @return bool   true if a fork is detected, false otherwise.
+        */
+        bool detectFork(void);
+
+        /*
+        * Sets forkId as current process id.
+        */
+        void setForkId();
+
         // Invalid SGX enclave ID value.
         static sgx_enclave_id_t mEnclaveInvalidId;
 
@@ -107,6 +146,9 @@ namespace P11Crypto
     private:
         // SGX enclave ID global.
         static sgx_enclave_id_t mSgxEnclaveId;
+
+        // To detect a fork.
+        static int forkId;
     };
 }
 #endif //ENCLAVE_HELPERS_H

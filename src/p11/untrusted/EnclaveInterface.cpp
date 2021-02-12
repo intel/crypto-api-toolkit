@@ -64,28 +64,6 @@ namespace EnclaveInterface
     }
 
     //---------------------------------------------------------------------------------------------
-    bool eIsInitialized(CK_VOID_PTR pInitArgs)
-    {
-        bool           retValue      = true;
-        CK_RV          rv            = CKR_FUNCTION_FAILED;
-        sgx_status_t   sgxStatus     = sgx_status_t::SGX_ERROR_UNEXPECTED;
-        P11Crypto::EnclaveHelpers enclaveHelpers;
-
-        sgxStatus = sgx_C_Initialize(enclaveHelpers.getSgxEnclaveId(),
-                                     &rv,
-                                     pInitArgs);
-
-        if (sgx_status_t::SGX_ERROR_ENCLAVE_LOST == sgxStatus)
-        {
-            __sync_lock_test_and_set(&enclaveHelpers.mSgxEnclaveLoadedCount, 0);
-            retValue = false;
-        }
-
-        return retValue;
-    }
-
-
-    //---------------------------------------------------------------------------------------------
     /* Crypto API toolkit currently does not support application passed mutex locks.
     *
     * Flag(CKF_OS_LOCKING_OK)           Mutexes                          Result

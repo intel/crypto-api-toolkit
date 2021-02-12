@@ -13859,10 +13859,19 @@ CK_RV SoftHSM::exportQuoteWithRsaPublicKey(const CK_SESSION_HANDLE& hSession,
 
     offset = sizeof(CK_RSA_PUBLIC_KEY_PARAMS);
 
+    auto publicKeyDataSize = publicKeyLength - sizeof(CK_RSA_PUBLIC_KEY_PARAMS);
+    auto digestInputLength = publicKeyDataSize + NONCE_LENGTH;
+    std::vector<CK_BYTE> digestInput(digestInputLength, 0);
+
+    memcpy_s(&digestInput[0], digestInputLength, outBuffer + offset, publicKeyDataSize);
+    static_assert((NONCE_LENGTH) <= 256, "Maximum NONCE length should be <= 256");
+    memcpy_s(&digestInput[0] + publicKeyDataSize, digestInputLength - publicKeyDataSize, \
+             CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS_INTERNAL_PTR(pMechanism->pParameter)->nonce, NONCE_LENGTH);
+
     rv = appendQuote(hSession,
                      &targetInfo,
-                     outBuffer + offset,
-                     publicKeyLength - sizeof(CK_RSA_PUBLIC_KEY_PARAMS), //should be same as (origOutBufferLength - offset - quoteLength) in ideal case
+                     &digestInput[0],
+                     digestInputLength,
                      outBuffer + publicKeyLength,
                      quoteLength);
 
@@ -13994,6 +14003,7 @@ CK_RV SoftHSM::appendQuote(const CK_SESSION_HANDLE& hSession,
     {
         return CKR_DATA_INVALID;
     }
+
 
     rv = digestAndCreateReport(hSession, targetInfo, &enclaveReport, data, dataLength);
 

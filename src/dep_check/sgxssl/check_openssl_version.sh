@@ -28,6 +28,7 @@
 #
 
 pushd src/dep_check/sgxssl/OSSLVersionEnclave
+make clean
 make SGXSSL_DIR=${1} SGXSSLLIB_DIR=${2} SGX_SDK=${3}
 ./OSSLVersion
 retval=$?

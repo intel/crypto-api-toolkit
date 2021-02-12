@@ -29,6 +29,33 @@
  *
  */
 
+ /*
+ * Copyright (c) 2010 SURFnet bv
+ * Copyright (c) 2010 .SE (The Internet Infrastructure Foundation)
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+ * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
+ * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
 #include "EnclaveHelpers.h"
 
 // Globals with file scope.
@@ -38,6 +65,7 @@ namespace P11Crypto
     volatile long       EnclaveHelpers::mSgxEnclaveLoadedCount  = 0;
     sgx_enclave_id_t    EnclaveHelpers::mSgxEnclaveId           = 0;
     std::string         enclaveFileName                         = (("NONE" == installationPath)? defaultLibraryPath : libraryDirectory) + "libp11SgxEnclave.signed.so";
+    int                 EnclaveHelpers::forkId                  = getpid();
 
     //---------------------------------------------------------------------------------------------
     EnclaveHelpers::EnclaveHelpers()
@@ -121,4 +149,16 @@ namespace P11Crypto
 
         return sgxStatus;
     } // unloadSgxEnclave()
+
+    //---------------------------------------------------------------------------------------------
+    bool EnclaveHelpers::detectFork(void)
+    {
+        return forkId != getpid();
+    }
+
+    //---------------------------------------------------------------------------------------------
+    void EnclaveHelpers::setForkId()
+    {
+        forkId = getpid();
+    }
 }

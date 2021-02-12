@@ -35,7 +35,7 @@
 # define ENCLAVE_FILENAME "enclave.signed.so"
 
 sgx_enclave_id_t global_eid = 0;
-const unsigned long openssl_version = 0x1010107fL; // openssl 1.1.1g version
+const unsigned long openssl_version = 0x1010109fL; // openssl 1.1.1i version
 
 /* Initialize the enclave:
  *   Call sgx_create_enclave to initialize an enclave instance

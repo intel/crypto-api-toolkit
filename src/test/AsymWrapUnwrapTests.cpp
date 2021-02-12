@@ -299,11 +299,14 @@ bool AsymWrapUnwrapTests::customQuoteEcdsa(const CK_MECHANISM_TYPE& mechanismTyp
     bool                    result             = false;
     std::vector<CK_BYTE>    quotePublicKey;
     CK_MECHANISM_PTR        pMechanism((CK_MECHANISM_PTR)&mechanism);
+    CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS quoteParams;
 
-    CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS quoteParams =
+    quoteParams.qlPolicy = qlPolicy;
+
+    for (CK_BYTE  i = 0; i < NONCE_LENGTH; i++)
     {
-        qlPolicy
-    };
+        quoteParams.nonce[i] = i;
+    }
 
     do
     {
@@ -342,7 +345,7 @@ bool AsymWrapUnwrapTests::customQuoteEcdsa(const CK_MECHANISM_TYPE& mechanismTyp
         // Extract the public key and verify its hash
         const uint32_t HASH_LENGTH = 32;
         std::vector<CK_BYTE> publicKeyHashInQuote(HASH_LENGTH, 0);
-        std::vector<CK_BYTE> publicKeyData(pubKeySize, 0);
+        std::vector<CK_BYTE> publicKeyNonceData(pubKeySize + NONCE_LENGTH, 0);
 
         // Fill the hash vector
         memcpy(publicKeyHashInQuote.data(),
@@ -350,14 +353,18 @@ bool AsymWrapUnwrapTests::customQuoteEcdsa(const CK_MECHANISM_TYPE& mechanismTyp
                HASH_LENGTH);
 
         // Fill the data vector
-        memcpy(publicKeyData.data(),
+        memcpy(publicKeyNonceData.data(),
                quotePublicKey.data() + sizeof(CK_RSA_PUBLIC_KEY_PARAMS),
                pubKeySize);
+
+        memcpy(publicKeyNonceData.data() + pubKeySize,
+               &quoteParams.nonce[0],
+               NONCE_LENGTH);
 
         // Compute hash of publicKeyData..
         std::vector<CK_BYTE> hashedData;
 
-        computeSHA256Hash(hSession, publicKeyData, hashedData);
+        computeSHA256Hash(hSession, publicKeyNonceData, hashedData);
 
         CPPUNIT_ASSERT (publicKeyHashInQuote == hashedData);
 

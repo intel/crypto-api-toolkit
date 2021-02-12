@@ -81,11 +81,9 @@ libp11sgx_la_SOURCES =  p11Enclave_u.c                      \
                         Directory.cpp                       \
                         QuoteGeneration.cpp
 
-.PHONY: p11Enclave_u.c
-
 p11Enclave_u.h: p11Enclave_u.c
 
-p11Enclave_u.c:
+p11Enclave_u.c: $(SGX_EDGER8R) ../enclave_config/p11Enclave.edl
 	$(SGX_EDGER8R) --untrusted p11Enclave.edl --search-path $(srcdir)/../../../ --search-path $(srcdir)/../enclave_config --search-path $(SGXSDKDIR)/include --search-path $(SGXSSLDIR)/include
 
 clean-local:

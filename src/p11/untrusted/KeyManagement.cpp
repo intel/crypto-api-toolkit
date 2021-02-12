@@ -37,6 +37,8 @@
 #include "QuoteGeneration.h"
 #endif
 
+#include <cstring>
+
 //---------------------------------------------------------------------------------------------
 CK_RV generateKey(CK_SESSION_HANDLE    hSession,
                   CK_MECHANISM_PTR     pMechanism,
@@ -136,7 +138,10 @@ CK_RV wrapKey(CK_SESSION_HANDLE hSession,
             return CKR_GENERAL_ERROR;
         }
 
-        quoteParamsInternal = { targetInfo, quoteLength };
+        quoteParamsInternal.targetInfo = targetInfo;
+        quoteParamsInternal.quoteLength = quoteLength;
+        static_assert((NONCE_LENGTH) <= 256, "Maximum NONCE length should be <= 256");
+        memcpy(quoteParamsInternal.nonce, CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS_PTR(pMechanism->pParameter)->nonce, NONCE_LENGTH);
 
         quoteMechanism.mechanism = CKM_EXPORT_ECDSA_QUOTE_RSA_PUBLIC_KEY_INTERNAL;
         quoteMechanism.pParameter = &quoteParamsInternal;

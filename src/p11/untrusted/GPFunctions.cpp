@@ -32,6 +32,7 @@
 #include "GPFunctions.h"
 #include "p11Sgx.h"
 #include "EnclaveInterface.h"
+#include "EnclaveHelpers.h"
 
 #include <iostream>
 
@@ -74,7 +75,16 @@ CK_RV initialize(CK_VOID_PTR pInitArgs)
         return rv;
     }
 
-    if (isInitialized() && EnclaveInterface::eIsInitialized(pInitArgs))
+    P11Crypto::EnclaveHelpers enclaveHelpers;
+
+    if (enclaveHelpers.detectFork())
+    {
+        EnclaveInterface::unloadEnclave();
+        deinit();
+        enclaveHelpers.setForkId();
+    }
+
+    if (isInitialized())
     {
         return CKR_CRYPTOKI_ALREADY_INITIALIZED;
     }
