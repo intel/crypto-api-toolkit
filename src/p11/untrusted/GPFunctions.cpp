@@ -91,7 +91,7 @@ CK_RV initialize(CK_VOID_PTR pInitArgs)
 
     if (EnclaveInterface::loadEnclave())
     {
-        rv == EnclaveInterface::initialize(pInitArgs);
+        rv = EnclaveInterface::initialize(pInitArgs);
 
         if(CKR_OK == rv)
         {
