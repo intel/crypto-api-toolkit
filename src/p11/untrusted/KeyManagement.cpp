@@ -38,6 +38,7 @@
 #endif
 
 #include <cstring>
+#include <stdio.h>
 
 //---------------------------------------------------------------------------------------------
 CK_RV generateKey(CK_SESSION_HANDLE    hSession,
@@ -116,10 +117,22 @@ CK_RV wrapKey(CK_SESSION_HANDLE hSession,
 
         quote3_error_t qrv = SGX_QL_SUCCESS;
 
-        qrv = sgx_qe_set_enclave_load_policy(static_cast<sgx_ql_request_policy_t>(CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS_PTR(pMechanism->pParameter)->qlPolicy));
-        if(SGX_QL_SUCCESS != qrv)
+        // When SGX_AESM_ADDR is set, that means the quote generation
+        // is done by external aemsd process, in this case we should
+        // not set enclave load policy.
+        const char *out_of_proc = std::getenv("SGX_AESM_ADDR");
+        bool is_out_of_proc = false;
+
+        if (out_of_proc && out_of_proc != "")
+            is_out_of_proc = true;
+
+        if (!is_out_of_proc)
         {
-            return CKR_GENERAL_ERROR;
+            qrv = sgx_qe_set_enclave_load_policy(static_cast<sgx_ql_request_policy_t>(CK_ECDSA_QUOTE_RSA_PUBLIC_KEY_PARAMS_PTR(pMechanism->pParameter)->qlPolicy));
+            if(SGX_QL_SUCCESS != qrv)
+            {
+                return CKR_GENERAL_ERROR;
+            }
         }
 
         sgx_target_info_t targetInfo{0};
