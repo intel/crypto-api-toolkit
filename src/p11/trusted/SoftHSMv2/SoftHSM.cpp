@@ -439,6 +439,7 @@ CK_ULONG nrSupportedMechanisms;
 CK_RV SoftHSM::C_Initialize(CK_VOID_PTR pInitArgs)
 {
 	CK_C_INITIALIZE_ARGS_PTR args;
+    CK_C_INITIALIZE_ARGS l_args;
 
 	// Check if PKCS#11 is already initialized
 	if (isInitialised)
@@ -455,7 +456,9 @@ CK_RV SoftHSM::C_Initialize(CK_VOID_PTR pInitArgs)
 			return CKR_ARGUMENTS_BAD;
 		}
 
-		args = (CK_C_INITIALIZE_ARGS_PTR)pInitArgs;
+        memcpy_s(&l_args, sizeof(CK_C_INITIALIZE_ARGS), pInitArgs, sizeof(CK_C_INITIALIZE_ARGS));
+
+        args = &l_args;
 
 		// Must be set to NULL_PTR in this version of PKCS#11
 		if (args->pReserved != NULL_PTR)
@@ -487,7 +490,6 @@ CK_RV SoftHSM::C_Initialize(CK_VOID_PTR pInitArgs)
             // Use our own mutex functions.
             resetMutexFactoryCallbacks();
             MutexFactory::i()->enable();
-
         }
         else
         {
@@ -629,6 +631,7 @@ CK_RV SoftHSM::C_Finalize(CK_VOID_PTR pReserved)
 CK_RV SoftHSM::C_GetInfo(CK_INFO_PTR pInfo)
 {
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+
 	if (pInfo == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
     if (!validate_user_check_ptr(pInfo, sizeof(CK_INFO)))
@@ -636,23 +639,29 @@ CK_RV SoftHSM::C_GetInfo(CK_INFO_PTR pInfo)
         return CKR_DEVICE_MEMORY;
     }
 
+    CK_INFO info{};
+
+	auto l_pInfo = &info;
+
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
 #endif
 
-	pInfo->cryptokiVersion.major = CRYPTOKI_VERSION_MAJOR;
-	pInfo->cryptokiVersion.minor = CRYPTOKI_VERSION_MINOR;
-	memset(pInfo->manufacturerID, ' ', 32);
-    memcpy_s(pInfo->manufacturerID, sizeof(pInfo->manufacturerID), "SGXHSM", strlen("SGXHSM"));
-	pInfo->flags = 0;
-	memset(pInfo->libraryDescription, ' ', 32);
+	l_pInfo->cryptokiVersion.major = CRYPTOKI_VERSION_MAJOR;
+	l_pInfo->cryptokiVersion.minor = CRYPTOKI_VERSION_MINOR;
+	memset(l_pInfo->manufacturerID, ' ', 32);
+    memcpy_s(l_pInfo->manufacturerID, sizeof(l_pInfo->manufacturerID), "SGXHSM", strlen("SGXHSM"));
+	l_pInfo->flags = 0;
+	memset(l_pInfo->libraryDescription, ' ', 32);
 #ifdef WITH_FIPS
-    memcpy_s(pInfo->libraryDescription, sizeof(pInfo->libraryDescription), "Implementation of PKCS11+FIPS", strlen("Implementation of PKCS11+FIPS"));
+    memcpy_s(l_pInfo->libraryDescription, sizeof(l_pInfo->libraryDescription), "Implementation of PKCS11+FIPS", strlen("Implementation of PKCS11+FIPS"));
 #else
-    memcpy_s(pInfo->libraryDescription, sizeof(pInfo->libraryDescription), "Implementation of PKCS11", strlen("Implementation of PKCS11"));
+    memcpy_s(l_pInfo->libraryDescription, sizeof(l_pInfo->libraryDescription), "Implementation of PKCS11", strlen("Implementation of PKCS11"));
 #endif
-	pInfo->libraryVersion.major = 2; //VERSION_MAJOR;
-	pInfo->libraryVersion.minor = 5; //VERSION_MINOR;
+	l_pInfo->libraryVersion.major = 2; //VERSION_MAJOR;
+	l_pInfo->libraryVersion.minor = 5; //VERSION_MINOR;
+
+    memcpy_s(pInfo, sizeof(CK_INFO), &info, sizeof(CK_INFO));
 
 	return CKR_OK;
 }
@@ -667,32 +676,40 @@ CK_RV SoftHSM::C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK
         return CKR_DEVICE_MEMORY;
     }
 
-    if (pSlotList && *pulCount)
-    {
-        if (!validate_user_check_ptr(pSlotList, sizeof(CK_SLOT_ID) * (*pulCount)))
-        {
-            return CKR_DEVICE_MEMORY;
-        }
-    }
+    auto ulCount = *pulCount;
 
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
 #endif
 
-	return slotManager->getSlotList(objectStore, tokenPresent, pSlotList, pulCount);
+    if (pSlotList && ulCount)
+    {
+        if (ulCount > MAX_SLOTS)
+        {
+            return CKR_ARGUMENTS_BAD;
+        }
+
+        if (!validate_user_check_ptr(pSlotList, sizeof(CK_SLOT_ID) * (ulCount)))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+    }
+
+    auto rv = slotManager->getSlotList(objectStore, tokenPresent, pSlotList, &ulCount);
+
+    *pulCount = ulCount;
+
+    return rv;
 }
 
 // Return information about a slot
 CK_RV SoftHSM::C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
 {
-	CK_RV rv;
-	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
-	if (pInfo == NULL_PTR) return CKR_ARGUMENTS_BAD;
+    CK_SLOT_INFO info{};
 
-    if (!validate_user_check_ptr(pInfo, sizeof(CK_SLOT_INFO)))
-    {
-        return CKR_DEVICE_MEMORY;
-    }
+	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+
+	if (pInfo == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
@@ -704,14 +721,23 @@ CK_RV SoftHSM::C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
 		return CKR_SLOT_ID_INVALID;
 	}
 
-	rv = slot->getSlotInfo(pInfo);
+    auto l_pInfo = &info;
+
+	auto rv = slot->getSlotInfo(l_pInfo);
 	if (rv != CKR_OK) {
 		return rv;
 	}
 
 	if (isRemovable) {
-		pInfo->flags |= CKF_REMOVABLE_DEVICE;
+		l_pInfo->flags |= CKF_REMOVABLE_DEVICE;
 	}
+
+    if (!validate_user_check_ptr(pInfo, sizeof(CK_SLOT_INFO)))
+    {
+        return CKR_DEVICE_MEMORY;
+    }
+
+    memcpy_s(pInfo, sizeof(CK_SLOT_INFO), &info, sizeof(CK_SLOT_INFO));
 
 	return CKR_OK;
 }
@@ -719,13 +745,12 @@ CK_RV SoftHSM::C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
 // Return information about a token in a slot
 CK_RV SoftHSM::C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
 {
-	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
-	if (pInfo == NULL_PTR) return CKR_ARGUMENTS_BAD;
+    CK_TOKEN_INFO info;
+    auto l_pInfo = &info;
 
-    if (!validate_user_check_ptr(pInfo, sizeof(CK_TOKEN_INFO)))
-    {
-        return CKR_DEVICE_MEMORY;
-    }
+	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+
+	if (pInfo == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
@@ -743,7 +768,19 @@ CK_RV SoftHSM::C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
 		return CKR_TOKEN_NOT_PRESENT;
 	}
 
-	return token->getTokenInfo(pInfo);
+	auto rv = token->getTokenInfo(l_pInfo);
+
+    if (CKR_OK == rv)
+    {
+        if (!validate_user_check_ptr(pInfo, sizeof(CK_TOKEN_INFO)))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        memcpy_s(pInfo, sizeof(CK_TOKEN_INFO), &info, sizeof(CK_TOKEN_INFO));
+    }
+
+    return rv;
 }
 
 void SoftHSM::prepareSupportedMechanisms(std::map<std::string, CK_MECHANISM_TYPE> &t)
@@ -913,6 +950,7 @@ void SoftHSM::prepareSupportedMechanisms(std::map<std::string, CK_MECHANISM_TYPE
 CK_RV SoftHSM::C_GetMechanismList(CK_SLOT_ID slotID, CK_MECHANISM_TYPE_PTR pMechanismList, CK_ULONG_PTR pulCount)
 {
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+
 	if (pulCount == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
     if (!validate_user_check_ptr(pulCount, sizeof(CK_ULONG)))
@@ -920,9 +958,16 @@ CK_RV SoftHSM::C_GetMechanismList(CK_SLOT_ID slotID, CK_MECHANISM_TYPE_PTR pMech
         return CKR_DEVICE_MEMORY;
     }
 
-    if (pMechanismList && *pulCount)
+    auto ulCount = *pulCount;
+
+    if (pMechanismList && ulCount)
     {
-        if (!validate_user_check_ptr(pMechanismList, sizeof(CK_MECHANISM_TYPE) * (*pulCount)))
+        if (ulCount > MAX_MECHANISM_COUNT)
+        {
+            return CKR_ARGUMENTS_BAD;
+        }
+
+        if (!validate_user_check_ptr(pMechanismList, sizeof(CK_MECHANISM_TYPE) * ulCount))
         {
             return CKR_DEVICE_MEMORY;
         }
@@ -945,7 +990,7 @@ CK_RV SoftHSM::C_GetMechanismList(CK_SLOT_ID slotID, CK_MECHANISM_TYPE_PTR pMech
 		return CKR_OK;
 	}
 
-	if (*pulCount < nrSupportedMechanisms)
+	if (ulCount < nrSupportedMechanisms)
 	{
 		*pulCount = nrSupportedMechanisms;
 
@@ -967,6 +1012,9 @@ CK_RV SoftHSM::C_GetMechanismList(CK_SLOT_ID slotID, CK_MECHANISM_TYPE_PTR pMech
 // Return more information about a mechanism for a given slot
 CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_MECHANISM_INFO_PTR pInfo)
 {
+    CK_MECHANISM_INFO info{};
+    auto l_pInfo = &info;
+
 	unsigned long rsaMinSize, rsaMaxSize;
 #if 0 // Unsupported by Crypto API Toolkit
 	unsigned long dsaMinSize, dsaMaxSize;
@@ -983,12 +1031,8 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 #endif
 
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
-	if (pInfo == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
-	if (!validate_user_check_ptr(pInfo, sizeof(CK_MECHANISM_INFO)))
-	{
-		return CKR_DEVICE_MEMORY;
-	}
+	if (pInfo == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
@@ -1104,58 +1148,58 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 		case CKM_SHA384:
 		case CKM_SHA512:
 			// Key size is not in use
-			pInfo->ulMinKeySize = 0;
-			pInfo->ulMaxKeySize = 0;
-			pInfo->flags = CKF_DIGEST;
+			l_pInfo->ulMinKeySize = 0;
+			l_pInfo->ulMaxKeySize = 0;
+			l_pInfo->flags = CKF_DIGEST;
 			break;
 #if 0 // Unsupported by Crypto API Toolkit
 #ifndef WITH_FIPS
 		case CKM_MD5_HMAC:
-			pInfo->ulMinKeySize = 16;
-			pInfo->ulMaxKeySize = 512;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			l_pInfo->ulMinKeySize = 16;
+			l_pInfo->ulMaxKeySize = 512;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 #endif
 		case CKM_SHA_1_HMAC:
-			pInfo->ulMinKeySize = 20;
-			pInfo->ulMaxKeySize = 512;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			l_pInfo->ulMinKeySize = 20;
+			l_pInfo->ulMaxKeySize = 512;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 		case CKM_SHA224_HMAC:
-			pInfo->ulMinKeySize = 28;
-			pInfo->ulMaxKeySize = 512;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			l_pInfo->ulMinKeySize = 28;
+			l_pInfo->ulMaxKeySize = 512;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 #endif // Unsupported by Crypto API Toolkit
 		case CKM_SHA256_HMAC:
-			pInfo->ulMinKeySize = 32;
-			pInfo->ulMaxKeySize = 512;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			l_pInfo->ulMinKeySize = 32;
+			l_pInfo->ulMaxKeySize = 512;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 		case CKM_SHA384_HMAC:
-			pInfo->ulMinKeySize = 48;
-			pInfo->ulMaxKeySize = 512;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			l_pInfo->ulMinKeySize = 48;
+			l_pInfo->ulMaxKeySize = 512;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 		case CKM_SHA512_HMAC:
-			pInfo->ulMinKeySize = 64;
-			pInfo->ulMaxKeySize = 512;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			l_pInfo->ulMinKeySize = 64;
+			l_pInfo->ulMaxKeySize = 512;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 		case CKM_RSA_PKCS_KEY_PAIR_GEN:
-			pInfo->ulMinKeySize = rsaMinSize;
-			pInfo->ulMaxKeySize = rsaMaxSize;
-			pInfo->flags = CKF_GENERATE_KEY_PAIR;
+			l_pInfo->ulMinKeySize = rsaMinSize;
+			l_pInfo->ulMaxKeySize = rsaMaxSize;
+			l_pInfo->flags = CKF_GENERATE_KEY_PAIR;
 			break;
 		case CKM_RSA_PKCS:
-			pInfo->ulMinKeySize = rsaMinSize;
-			pInfo->ulMaxKeySize = rsaMaxSize;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY | CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP;
+			l_pInfo->ulMinKeySize = rsaMinSize;
+			l_pInfo->ulMaxKeySize = rsaMaxSize;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY | CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP;
 			break;
 		case CKM_RSA_X_509:
-			pInfo->ulMinKeySize = rsaMinSize;
-			pInfo->ulMaxKeySize = rsaMaxSize;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY | CKF_ENCRYPT | CKF_DECRYPT;
+			l_pInfo->ulMinKeySize = rsaMinSize;
+			l_pInfo->ulMaxKeySize = rsaMaxSize;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY | CKF_ENCRYPT | CKF_DECRYPT;
 			break;
 #if 0 // Unsupported by Crypto API Toolkit
 #ifndef WITH_FIPS
@@ -1175,20 +1219,20 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 		case CKM_SHA256_RSA_PKCS_PSS:
 		case CKM_SHA384_RSA_PKCS_PSS:
 		case CKM_SHA512_RSA_PKCS_PSS:
-			pInfo->ulMinKeySize = rsaMinSize;
-			pInfo->ulMaxKeySize = rsaMaxSize;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			l_pInfo->ulMinKeySize = rsaMinSize;
+			l_pInfo->ulMaxKeySize = rsaMaxSize;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 		case CKM_RSA_PKCS_OAEP:
-			pInfo->ulMinKeySize = rsaMinSize;
-			pInfo->ulMaxKeySize = rsaMaxSize;
-			pInfo->flags = CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP;
+			l_pInfo->ulMinKeySize = rsaMinSize;
+			l_pInfo->ulMaxKeySize = rsaMaxSize;
+			l_pInfo->flags = CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP;
 			break;
 #if 0 // Unsupported by Crypto API Toolkit
 		case CKM_GENERIC_SECRET_KEY_GEN:
-			pInfo->ulMinKeySize = 1;
-			pInfo->ulMaxKeySize = 0x80000000;
-			pInfo->flags = CKF_GENERATE;
+			l_pInfo->ulMinKeySize = 1;
+			l_pInfo->ulMaxKeySize = 0x80000000;
+			l_pInfo->flags = CKF_GENERATE;
 			break;
 #ifndef WITH_FIPS
 		case CKM_DES_KEY_GEN:
@@ -1196,9 +1240,9 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 		case CKM_DES2_KEY_GEN:
 		case CKM_DES3_KEY_GEN:
 			// Key size is not in use
-			pInfo->ulMinKeySize = 0;
-			pInfo->ulMaxKeySize = 0;
-			pInfo->flags = CKF_GENERATE;
+			l_pInfo->ulMinKeySize = 0;
+			l_pInfo->ulMaxKeySize = 0;
+			l_pInfo->flags = CKF_GENERATE;
 			break;
 #ifndef WITH_FIPS
 		case CKM_DES_ECB:
@@ -1209,21 +1253,21 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 		case CKM_DES3_CBC:
 		case CKM_DES3_CBC_PAD:
 			// Key size is not in use
-			pInfo->ulMinKeySize = 0;
-			pInfo->ulMaxKeySize = 0;
-			pInfo->flags = CKF_ENCRYPT | CKF_DECRYPT;
+			l_pInfo->ulMinKeySize = 0;
+			l_pInfo->ulMaxKeySize = 0;
+			l_pInfo->flags = CKF_ENCRYPT | CKF_DECRYPT;
 			break;
 		case CKM_DES3_CMAC:
 			// Key size is not in use
-			pInfo->ulMinKeySize = 0;
-			pInfo->ulMaxKeySize = 0;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			l_pInfo->ulMinKeySize = 0;
+			l_pInfo->ulMaxKeySize = 0;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 #endif // Unsupported by Crypto API Toolkit
 		case CKM_AES_KEY_GEN:
-			pInfo->ulMinKeySize = 16;
-			pInfo->ulMaxKeySize = 32;
-			pInfo->flags = CKF_GENERATE;
+			l_pInfo->ulMinKeySize = 16;
+			l_pInfo->ulMaxKeySize = 32;
+			l_pInfo->flags = CKF_GENERATE;
 			break;
 #if 0 // Unsupported by Crypto API Toolkit
 		case CKM_AES_ECB:
@@ -1234,20 +1278,20 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 #ifdef WITH_AES_GCM
 		case CKM_AES_GCM:
 #endif
-			pInfo->ulMinKeySize = 16;
-			pInfo->ulMaxKeySize = 32;
-			pInfo->flags = CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP;
+			l_pInfo->ulMinKeySize = 16;
+			l_pInfo->ulMaxKeySize = 32;
+			l_pInfo->flags = CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP;
 			break;
 		case CKM_AES_KEY_WRAP:
-			pInfo->ulMinKeySize = 16;
-			pInfo->ulMaxKeySize = 0x80000000;
-			pInfo->flags = CKF_WRAP | CKF_UNWRAP;
+			l_pInfo->ulMinKeySize = 16;
+			l_pInfo->ulMaxKeySize = 0x80000000;
+			l_pInfo->flags = CKF_WRAP | CKF_UNWRAP;
 			break;
 #ifdef HAVE_AES_KEY_WRAP_PAD
 		case CKM_AES_KEY_WRAP_PAD:
-			pInfo->ulMinKeySize = 1;
-			pInfo->ulMaxKeySize = 0x80000000;
-			pInfo->flags = CKF_WRAP | CKF_UNWRAP;
+			l_pInfo->ulMinKeySize = 1;
+			l_pInfo->ulMaxKeySize = 0x80000000;
+			l_pInfo->flags = CKF_WRAP | CKF_UNWRAP;
 			break;
 #endif
 #if 0 // Unsupported by Crypto API Toolkit
@@ -1261,25 +1305,25 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 #endif // Unsupported by Crypto API Toolkit
 		case CKM_AES_CBC_ENCRYPT_DATA:
 			// Key size is not in use
-			pInfo->ulMinKeySize = 0;
-			pInfo->ulMaxKeySize = 0;
-			pInfo->flags = CKF_DERIVE;
+			l_pInfo->ulMinKeySize = 0;
+			l_pInfo->ulMaxKeySize = 0;
+			l_pInfo->flags = CKF_DERIVE;
 			break;
 #if 0 // Unsupported by Crypto API Toolkit
 		case CKM_AES_CMAC:
-			pInfo->ulMinKeySize = 16;
-			pInfo->ulMaxKeySize = 32;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			l_pInfo->ulMinKeySize = 16;
+			l_pInfo->ulMaxKeySize = 32;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 		case CKM_DSA_PARAMETER_GEN:
-			pInfo->ulMinKeySize = dsaMinSize;
-			pInfo->ulMaxKeySize = dsaMaxSize;
-			pInfo->flags = CKF_GENERATE;
+			l_pInfo->ulMinKeySize = dsaMinSize;
+			l_pInfo->ulMaxKeySize = dsaMaxSize;
+			l_pInfo->flags = CKF_GENERATE;
 			break;
 		case CKM_DSA_KEY_PAIR_GEN:
-			pInfo->ulMinKeySize = dsaMinSize;
-			pInfo->ulMaxKeySize = dsaMaxSize;
-			pInfo->flags = CKF_GENERATE_KEY_PAIR;
+			l_pInfo->ulMinKeySize = dsaMinSize;
+			l_pInfo->ulMaxKeySize = dsaMaxSize;
+			l_pInfo->flags = CKF_GENERATE_KEY_PAIR;
 			break;
 		case CKM_DSA:
 		case CKM_DSA_SHA1:
@@ -1287,45 +1331,45 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 		case CKM_DSA_SHA256:
 		case CKM_DSA_SHA384:
 		case CKM_DSA_SHA512:
-			pInfo->ulMinKeySize = dsaMinSize;
-			pInfo->ulMaxKeySize = dsaMaxSize;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			l_pInfo->ulMinKeySize = dsaMinSize;
+			l_pInfo->ulMaxKeySize = dsaMaxSize;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 		case CKM_DH_PKCS_KEY_PAIR_GEN:
-			pInfo->ulMinKeySize = dhMinSize;
-			pInfo->ulMaxKeySize = dhMaxSize;
-			pInfo->flags = CKF_GENERATE_KEY_PAIR;
+			l_pInfo->ulMinKeySize = dhMinSize;
+			l_pInfo->ulMaxKeySize = dhMaxSize;
+			l_pInfo->flags = CKF_GENERATE_KEY_PAIR;
 			break;
 		case CKM_DH_PKCS_PARAMETER_GEN:
-			pInfo->ulMinKeySize = dhMinSize;
-			pInfo->ulMaxKeySize = dhMaxSize;
-			pInfo->flags = CKF_GENERATE;
+			l_pInfo->ulMinKeySize = dhMinSize;
+			l_pInfo->ulMaxKeySize = dhMaxSize;
+			l_pInfo->flags = CKF_GENERATE;
 			break;
 		case CKM_DH_PKCS_DERIVE:
-			pInfo->ulMinKeySize = dhMinSize;
-			pInfo->ulMaxKeySize = dhMaxSize;
-			pInfo->flags = CKF_DERIVE;
+			l_pInfo->ulMinKeySize = dhMinSize;
+			l_pInfo->ulMaxKeySize = dhMaxSize;
+			l_pInfo->flags = CKF_DERIVE;
 			break;
 #endif // Unsupported by Crypto API Toolkit
 #ifdef WITH_ECC
 		case CKM_EC_KEY_PAIR_GEN:
-			pInfo->ulMinKeySize = ecdsaMinSize;
-			pInfo->ulMaxKeySize = ecdsaMaxSize;
+			l_pInfo->ulMinKeySize = ecdsaMinSize;
+			l_pInfo->ulMaxKeySize = ecdsaMaxSize;
 #define CKF_EC_COMMOM	(CKF_EC_F_P | CKF_EC_NAMEDCURVE | CKF_EC_UNCOMPRESS)
-			pInfo->flags = CKF_GENERATE_KEY_PAIR | CKF_EC_COMMOM;
+			l_pInfo->flags = CKF_GENERATE_KEY_PAIR | CKF_EC_COMMOM;
 			break;
 		case CKM_ECDSA:
-			pInfo->ulMinKeySize = ecdsaMinSize;
-			pInfo->ulMaxKeySize = ecdsaMaxSize;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY | CKF_EC_COMMOM;
+			l_pInfo->ulMinKeySize = ecdsaMinSize;
+			l_pInfo->ulMaxKeySize = ecdsaMaxSize;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY | CKF_EC_COMMOM;
 			break;
 #endif
 #if defined(WITH_ECC) || defined(WITH_EDDSA)
 #if 0 // Unsupported by Crypto API Toolkit
 		case CKM_ECDH1_DERIVE:
-			pInfo->ulMinKeySize = ecdhMinSize ? ecdhMinSize : eddsaMinSize;
-			pInfo->ulMaxKeySize = ecdhMaxSize ? ecdhMaxSize : eddsaMaxSize;
-			pInfo->flags = CKF_DERIVE;
+			l_pInfo->ulMinKeySize = ecdhMinSize ? ecdhMinSize : eddsaMinSize;
+			l_pInfo->ulMaxKeySize = ecdhMaxSize ? ecdhMaxSize : eddsaMaxSize;
+			l_pInfo->flags = CKF_DERIVE;
 			break;
 #endif // Unsupported by Crypto API Toolkit
 #endif
@@ -1333,52 +1377,52 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 #ifdef WITH_GOST
 		case CKM_GOSTR3411:
 			// Key size is not in use
-			pInfo->ulMinKeySize = 0;
-			pInfo->ulMaxKeySize = 0;
-			pInfo->flags = CKF_DIGEST;
+			l_pInfo->ulMinKeySize = 0;
+			l_pInfo->ulMaxKeySize = 0;
+			l_pInfo->flags = CKF_DIGEST;
 			break;
 		case CKM_GOSTR3411_HMAC:
 			// Key size is not in use
-			pInfo->ulMinKeySize = 32;
-			pInfo->ulMaxKeySize = 512;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			l_pInfo->ulMinKeySize = 32;
+			l_pInfo->ulMaxKeySize = 512;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 		case CKM_GOSTR3410_KEY_PAIR_GEN:
 			// Key size is not in use
-			pInfo->ulMinKeySize = 0;
-			pInfo->ulMaxKeySize = 0;
-			pInfo->flags = CKF_GENERATE_KEY_PAIR;
+			l_pInfo->ulMinKeySize = 0;
+			l_pInfo->ulMaxKeySize = 0;
+			l_pInfo->flags = CKF_GENERATE_KEY_PAIR;
 			break;
 		case CKM_GOSTR3410:
 			// Key size is not in use
-			pInfo->ulMinKeySize = 0;
-			pInfo->ulMaxKeySize = 0;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			l_pInfo->ulMinKeySize = 0;
+			l_pInfo->ulMaxKeySize = 0;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 		case CKM_GOSTR3410_WITH_GOSTR3411:
 			// Key size is not in use
-			pInfo->ulMinKeySize = 0;
-			pInfo->ulMaxKeySize = 0;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			l_pInfo->ulMinKeySize = 0;
+			l_pInfo->ulMaxKeySize = 0;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 #endif
 #endif // Unsupported by Crypto API Toolkit
 #ifdef WITH_EDDSA
 		case CKM_EC_EDWARDS_KEY_PAIR_GEN:
-			pInfo->ulMinKeySize = eddsaMinSize;
-			pInfo->ulMaxKeySize = eddsaMaxSize;
-			pInfo->flags = CKF_GENERATE_KEY_PAIR;
+			l_pInfo->ulMinKeySize = eddsaMinSize;
+			l_pInfo->ulMaxKeySize = eddsaMaxSize;
+			l_pInfo->flags = CKF_GENERATE_KEY_PAIR;
 			break;
 		case CKM_EDDSA:
-			pInfo->ulMinKeySize = eddsaMinSize;
-			pInfo->ulMaxKeySize = eddsaMaxSize;
-			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			l_pInfo->ulMinKeySize = eddsaMinSize;
+			l_pInfo->ulMaxKeySize = eddsaMaxSize;
+			l_pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 #endif
 		case CKM_EXPORT_ECDSA_QUOTE_RSA_PUBLIC_KEY:
-			pInfo->ulMinKeySize = 0;
-			pInfo->ulMaxKeySize = 0;
-			pInfo->flags = CKF_WRAP;
+			l_pInfo->ulMinKeySize = 0;
+			l_pInfo->ulMaxKeySize = 0;
+			l_pInfo->flags = CKF_WRAP;
 			break;
 		default:
 			// DEBUG_MSG("The selected mechanism is not supported");
@@ -1387,8 +1431,15 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 	}
 
 #ifdef SGXHSM
-    pInfo->flags |= CKF_HW;
+    l_pInfo->flags |= CKF_HW;
 #endif
+
+	if (!validate_user_check_ptr(pInfo, sizeof(CK_MECHANISM_INFO)))
+	{
+		return CKR_DEVICE_MEMORY;
+	}
+
+    memcpy_s(pInfo, sizeof(CK_MECHANISM_INFO), l_pInfo, sizeof(CK_MECHANISM_INFO));
 
 	return CKR_OK;
 }
@@ -1409,16 +1460,21 @@ CK_RV SoftHSM::C_InitToken(CK_SLOT_ID slotID, CK_UTF8CHAR_PTR pPin, CK_ULONG ulP
 	{
 		return CKR_SESSION_EXISTS;
 	}
-
+    
 	// Check the PIN
 	if (pPin == NULL_PTR) return CKR_ARGUMENTS_BAD;
+    if (pLabel == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	if (ulPinLen < MIN_PIN_LEN || ulPinLen > MAX_PIN_LEN) return CKR_PIN_INCORRECT;
 
+    // pLabel points to the 32-byte label of the token
 	if (!validate_user_check_ptr(pPin, ulPinLen) ||
 		!validate_user_check_ptr(pLabel, 32))
 	{
 		return CKR_DEVICE_MEMORY;
 	}
+
+    CK_UTF8CHAR label[32];
+    memcpy_s(&label, 32, pLabel, 32);
 
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
@@ -1426,7 +1482,7 @@ CK_RV SoftHSM::C_InitToken(CK_SLOT_ID slotID, CK_UTF8CHAR_PTR pPin, CK_ULONG ulP
 
 	ByteString soPIN(pPin, ulPinLen);
 
-	return slot->initToken(soPIN, pLabel);
+	return slot->initToken(soPIN, label);
 }
 
 // Initialise the user PIN
@@ -1477,6 +1533,8 @@ CK_RV SoftHSM::C_SetPIN(CK_SESSION_HANDLE hSession, CK_UTF8CHAR_PTR pOldPin, CK_
 	// Check the new PINs
 	if (pOldPin == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	if (pNewPin == NULL_PTR) return CKR_ARGUMENTS_BAD;
+
+	if (ulOldLen < MIN_PIN_LEN || ulOldLen > MAX_PIN_LEN) return CKR_PIN_INCORRECT;
 	if (ulNewLen < MIN_PIN_LEN || ulNewLen > MAX_PIN_LEN) return CKR_PIN_LEN_RANGE;
 
 	if (!validate_user_check_ptr(pOldPin, ulOldLen) ||
@@ -1538,12 +1596,13 @@ CK_RV SoftHSM::C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApp
 
 	Slot* slot = slotManager->getSlot(slotID);
 
-	CK_RV rv = sessionManager->openSession(slot, flags, pApplication, notify, phSession);
+    CK_SESSION_HANDLE hSession;
+	CK_RV rv = sessionManager->openSession(slot, flags, pApplication, notify, &hSession);
 	if (rv != CKR_OK)
 		return rv;
 
 	// Get a pointer to the session object and store it in the handle manager.
-	Session* session = sessionManager->getSession(*phSession);
+	Session* session = sessionManager->getSession(hSession);
 	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
 	*phSession = handleManager->addSession(slotID,session);
 
@@ -1599,13 +1658,11 @@ CK_RV SoftHSM::C_CloseAllSessions(CK_SLOT_ID slotID)
 // Retrieve information about the specified session
 CK_RV SoftHSM::C_GetSessionInfo(CK_SESSION_HANDLE hSession, CK_SESSION_INFO_PTR pInfo)
 {
-	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
-	if (!pInfo) return CKR_ARGUMENTS_BAD;
+    CK_SESSION_INFO info;
 
-	if (!validate_user_check_ptr(pInfo, sizeof(CK_SESSION_INFO)))
-	{
-		return CKR_DEVICE_MEMORY;
-	}
+	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+
+	if (!pInfo) return CKR_ARGUMENTS_BAD;
 
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
@@ -1615,7 +1672,19 @@ CK_RV SoftHSM::C_GetSessionInfo(CK_SESSION_HANDLE hSession, CK_SESSION_INFO_PTR 
 	Session* session = (Session*)handleManager->getSession(hSession);
 	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
 
-	return session->getInfo(pInfo);
+	auto rv = session->getInfo(&info);
+    if (CKR_OK == rv)
+    {
+        if (!validate_user_check_ptr(pInfo, sizeof(CK_SESSION_INFO)))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        memcpy_s(pInfo, sizeof(CK_SESSION_INFO), &info, sizeof(CK_SESSION_INFO));
+    }
+    
+    return rv;
+
 }
 
 // Determine the state of a running operation in a session
@@ -1655,6 +1724,7 @@ CK_RV SoftHSM::C_Login(CK_SESSION_HANDLE hSession, CK_USER_TYPE userType, CK_UTF
 
 	// Get the PIN
 	if (pPin == NULL_PTR) return CKR_ARGUMENTS_BAD;
+	if (ulPinLen < MIN_PIN_LEN || ulPinLen > MAX_PIN_LEN) return CKR_PIN_INCORRECT;
 
 	if (!validate_user_check_ptr(pPin, ulPinLen))
 	{
@@ -1731,31 +1801,66 @@ CK_RV SoftHSM::C_Logout(CK_SESSION_HANDLE hSession)
 // Create a new object on the token in the specified session using the given attribute template
 CK_RV SoftHSM::C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount, CK_OBJECT_HANDLE_PTR phObject)
 {
+    CK_RV rv = CKR_OK;
+    CK_OBJECT_HANDLE hObject;
+    CK_OBJECT_HANDLE_PTR l_phObject = &hObject;
+
 	if (!validate_user_check_ptr(phObject, sizeof(CK_OBJECT_HANDLE)))
 	{
 		return CKR_DEVICE_MEMORY;
 	}
+
+	if (pTemplate == NULL_PTR) return CKR_ARGUMENTS_BAD;
+    if (ulCount > CKA_MAX_ATTRIBUTES)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
 
 	if (!validate_user_check_attribute_ptr(pTemplate, ulCount))
 	{
 		return CKR_DEVICE_MEMORY;
 	}
 
+    CK_ATTRIBUTE l_template[ulCount];
+    memset_s(l_template, ulCount * sizeof(CK_ATTRIBUTE), 0x00, ulCount * sizeof(CK_ATTRIBUTE));
+    memcpy_s(l_template, ulCount * sizeof(CK_ATTRIBUTE), pTemplate, ulCount * sizeof(CK_ATTRIBUTE));
+
+    std::vector<std::vector<CK_BYTE>> value(ulCount);
+
+    for (CK_ULONG i = 0; i < ulCount; i++)
+    {
+        if (l_template[i].pValue == nullptr)
+        {
+            continue;
+        }
+
+        auto ulValueLen = l_template[i].ulValueLen;
+        if (!validate_user_check_ptr(l_template[i].pValue, ulValueLen))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        value[i].resize(ulValueLen);
+        memcpy_s(value[i].data(), ulValueLen, l_template[i].pValue, ulValueLen);
+        l_template[i].pValue = value[i].data();
+    }
+
+    auto l_pTemplate = l_template;
+
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
 #endif
 
 #ifdef SGXHSM
-    if (isRestrictedKeyAttributeValue(pTemplate, ulCount, false))
+    if (isRestrictedKeyAttributeValue(l_pTemplate, ulCount, false))
     {
         return CKR_ATTRIBUTE_TYPE_INVALID;
     }
 
     CK_KEY_TYPE keyType = CKK_VENDOR_DEFINED;
-    if (isSupportedKeyObject(pTemplate, ulCount, &keyType))
+    if (isSupportedKeyObject(l_pTemplate, ulCount, &keyType))
     {
-        CK_RV rv = CKR_OK;
-        CK_ULONG keyLen = getKeyLength(pTemplate, ulCount);
+        CK_ULONG keyLen = getKeyLength(l_pTemplate, ulCount);
 
         if (0 == keyLen)
         {
@@ -1779,10 +1884,10 @@ CK_RV SoftHSM::C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemp
             return CKR_FUNCTION_FAILED;
         }
 
-        rv = this->CreateObject(hSession, pTemplate, ulCount, phObject, OBJECT_OP_CREATE_AES_KEY);
+        rv = this->CreateObject(hSession, l_pTemplate, ulCount, l_phObject, OBJECT_OP_CREATE_AES_KEY);
         if (CKR_OK == rv)
         {
-            OSObject* osobject = (OSObject*)handleManager->getObject(*phObject);
+            OSObject* osobject = (OSObject*)handleManager->getObject(hObject);
             if (!osobject || !osobject->isValid())
             {
                 rv = CKR_FUNCTION_FAILED;
@@ -1808,7 +1913,7 @@ CK_RV SoftHSM::C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemp
                     }
                     else
                     {
-                        if (isPrivateObject(pTemplate, ulCount))
+                        if (isPrivateObject(l_pTemplate, ulCount))
                         {
                             bOK = token->encrypt(keyBytes, encryptedKeyBytes);
                             if (bOK)
@@ -1842,23 +1947,32 @@ CK_RV SoftHSM::C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemp
         }
         if (CKR_OK != rv)
         {
-            OSObject* object = (OSObject*)handleManager->getObject(*phObject);
+            OSObject* object = (OSObject*)handleManager->getObject(hObject);
             if (object)
             {
                 object->destroyObject();
             }
-            handleManager->destroyObject(*phObject);
-            *phObject = CK_INVALID_HANDLE;
+            handleManager->destroyObject(hObject);
+            hObject = CK_INVALID_HANDLE;
         }
+
+        *phObject = hObject;
+
         return rv;
     }
 #endif
-	return this->CreateObject(hSession,pTemplate,ulCount,phObject,OBJECT_OP_CREATE);
+	rv = this->CreateObject(hSession,l_pTemplate,ulCount,l_phObject,OBJECT_OP_CREATE);
+
+    *phObject = hObject;
+
+    return rv;
 }
 
 // Create a copy of the object with the specified handle
 CK_RV SoftHSM::C_CopyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount, CK_OBJECT_HANDLE_PTR phNewObject)
 {
+    CK_OBJECT_HANDLE hNewObject;
+
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
 	if (pTemplate == NULL_PTR) return CKR_ARGUMENTS_BAD;
@@ -1869,16 +1983,47 @@ CK_RV SoftHSM::C_CopyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject
         return CKR_DEVICE_MEMORY;
     }
 
+    if (ulCount > CKA_MAX_ATTRIBUTES)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
 	if (!validate_user_check_attribute_ptr(pTemplate, ulCount))
 	{
 		return CKR_DEVICE_MEMORY;
 	}
 
+    CK_ATTRIBUTE l_template[ulCount];
+    memset_s(l_template, ulCount * sizeof(CK_ATTRIBUTE), 0x00, ulCount * sizeof(CK_ATTRIBUTE));
+    memcpy_s(l_template, ulCount * sizeof(CK_ATTRIBUTE), pTemplate, ulCount * sizeof(CK_ATTRIBUTE));
+
+    std::vector<std::vector<CK_BYTE>> value(ulCount);
+
+    for (CK_ULONG i = 0; i < ulCount; i++)
+    {
+        if (l_template[i].pValue == nullptr)
+        {
+            continue;
+        }
+
+        auto ulValueLen = l_template[i].ulValueLen;
+        if (!validate_user_check_ptr(l_template[i].pValue, ulValueLen))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        value[i].resize(ulValueLen);
+        memcpy_s(value[i].data(), ulValueLen, l_template[i].pValue, ulValueLen);
+        l_template[i].pValue = value[i].data();
+    }
+
+    auto l_pTemplate = l_template;
+
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
 #endif
 
-	*phNewObject = CK_INVALID_HANDLE;
+	hNewObject = CK_INVALID_HANDLE;
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -1921,14 +2066,14 @@ CK_RV SoftHSM::C_CopyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject
 
 	for (CK_ULONG i = 0; i < ulCount; i++)
 	{
-		if ((pTemplate[i].type == CKA_TOKEN) && (pTemplate[i].ulValueLen == sizeof(CK_BBOOL)))
+		if ((l_pTemplate[i].type == CKA_TOKEN) && (l_pTemplate[i].ulValueLen == sizeof(CK_BBOOL)))
 		{
-			isOnToken = *(CK_BBOOL*)pTemplate[i].pValue;
+			isOnToken = *(CK_BBOOL*)l_pTemplate[i].pValue;
 			continue;
 		}
-		if ((pTemplate[i].type == CKA_PRIVATE) && (pTemplate[i].ulValueLen == sizeof(CK_BBOOL)))
+		if ((l_pTemplate[i].type == CKA_PRIVATE) && (l_pTemplate[i].ulValueLen == sizeof(CK_BBOOL)))
 		{
-			isPrivate = *(CK_BBOOL*)pTemplate[i].pValue;
+			isPrivate = *(CK_BBOOL*)l_pTemplate[i].pValue;
 			continue;
 		}
 	}
@@ -2033,7 +2178,7 @@ CK_RV SoftHSM::C_CopyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject
 	}
 
 	// Apply the template
-	rv = newp11object->saveTemplate(token, isPrivate != CK_FALSE, pTemplate, ulCount, OBJECT_OP_COPY);
+	rv = newp11object->saveTemplate(token, isPrivate != CK_FALSE, l_pTemplate, ulCount, OBJECT_OP_COPY);
 	delete newp11object;
 
 	if (rv != CKR_OK)
@@ -2045,12 +2190,14 @@ CK_RV SoftHSM::C_CopyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject
 	// Set handle
 	if (isOnToken)
 	{
-		*phNewObject = handleManager->addTokenObject(slot->getSlotID(), isPrivate != CK_FALSE, newobject);
+		hNewObject = handleManager->addTokenObject(slot->getSlotID(), isPrivate != CK_FALSE, newobject);
 	}
 	else
 	{
-		*phNewObject = handleManager->addSessionObject(slot->getSlotID(), hSession, isPrivate != CK_FALSE, newobject);
+		hNewObject = handleManager->addSessionObject(slot->getSlotID(), hSession, isPrivate != CK_FALSE, newobject);
 	}
+
+    *phNewObject = hNewObject;
 
 	return CKR_OK;
 }
@@ -2124,11 +2271,12 @@ CK_RV SoftHSM::C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObj
 // Determine the size of the specified object
 CK_RV SoftHSM::C_GetObjectSize(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, CK_ULONG_PTR pulSize)
 {
+    auto l_pulSize = pulSize;
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
-	if (pulSize == NULL) return CKR_ARGUMENTS_BAD;
+	if (l_pulSize == NULL) return CKR_ARGUMENTS_BAD;
 
-	if (!validate_user_check_ptr(pulSize, sizeof(CK_ULONG)))
+	if (!validate_user_check_ptr(l_pulSize, sizeof(CK_ULONG)))
 	{
 		return CKR_DEVICE_MEMORY;
 	}
@@ -2149,7 +2297,7 @@ CK_RV SoftHSM::C_GetObjectSize(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObj
 	OSObject *object = (OSObject *)handleManager->getObject(hObject);
 	if (object == NULL_PTR || !object->isValid()) return CKR_OBJECT_HANDLE_INVALID;
 
-	*pulSize = CK_UNAVAILABLE_INFORMATION;
+	*l_pulSize = CK_UNAVAILABLE_INFORMATION;
 
 	return CKR_OK;
 }
@@ -2161,17 +2309,51 @@ CK_RV SoftHSM::C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE 
 
 	if (pTemplate == NULL) return CKR_ARGUMENTS_BAD;
 
+    if (ulCount > CKA_MAX_ATTRIBUTES)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
 	if (!validate_user_check_attribute_ptr(pTemplate, ulCount))
 	{
 		return CKR_DEVICE_MEMORY;
 	}
+
+    CK_ATTRIBUTE l_template[ulCount];
+    CK_ATTRIBUTE l_template1[ulCount];
+    memset_s(l_template, ulCount * sizeof(CK_ATTRIBUTE), 0x00, ulCount * sizeof(CK_ATTRIBUTE));
+    memcpy_s(l_template, ulCount * sizeof(CK_ATTRIBUTE), pTemplate, ulCount * sizeof(CK_ATTRIBUTE));
+    memset_s(l_template1, ulCount * sizeof(CK_ATTRIBUTE), 0x00, ulCount * sizeof(CK_ATTRIBUTE));
+    memcpy_s(l_template1, ulCount * sizeof(CK_ATTRIBUTE), l_template, ulCount * sizeof(CK_ATTRIBUTE));
+
+    std::vector<std::vector<CK_BYTE>> value(ulCount);
+
+    for (CK_ULONG i = 0; i < ulCount; i++)
+    {
+        auto ulValueLen = l_template[i].ulValueLen;
+        if (l_template[i].pValue == nullptr)
+        {
+            continue;
+        }
+
+        if (!validate_user_check_ptr(l_template[i].pValue, ulValueLen))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        value[i].resize(ulValueLen);
+        memcpy_s(value[i].data(), ulValueLen, l_template[i].pValue, ulValueLen);
+        l_template[i].pValue = value[i].data();
+    }
+
+    auto l_pTemplate = l_template;
 
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
 #endif
 
 #ifdef SGXHSM
-    if (isRestrictedKeyAttributeValue(pTemplate, ulCount, false, hObject))
+    if (isRestrictedKeyAttributeValue(l_pTemplate, ulCount, false, hObject))
     {
        return CKR_ATTRIBUTE_TYPE_INVALID;
     }
@@ -2217,8 +2399,26 @@ CK_RV SoftHSM::C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE 
     }
 
 	// Ask the P11Object to fill the template with attribute values.
-	rv = p11object->loadTemplate(token, pTemplate,ulCount);
+	rv = p11object->loadTemplate(token, l_pTemplate, ulCount);
 	delete p11object;
+
+    if (CKR_OK == rv)
+    {
+        for (CK_ULONG i = 0; i < ulCount; i++)
+        {
+            auto ulValueLen = l_template[i].ulValueLen;
+            pTemplate[i].ulValueLen = ulValueLen;
+
+            if (!l_template1[i].pValue || !l_template[i].pValue)
+            {
+                continue;
+            }
+
+            pTemplate[i].type = l_template[i].type;
+            memcpy_s(l_template1[i].pValue, ulValueLen, l_template[i].pValue, ulValueLen);
+        }
+    }
+
 	return rv;
 }
 
@@ -2227,19 +2427,50 @@ CK_RV SoftHSM::C_SetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE 
 {
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
-	if (pTemplate == NULL) return CKR_ARGUMENTS_BAD;
+	if (pTemplate == NULL_PTR) return CKR_ARGUMENTS_BAD;
+
+    if (ulCount > CKA_MAX_ATTRIBUTES)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
 
 	if (!validate_user_check_attribute_ptr(pTemplate, ulCount))
 	{
 		return CKR_DEVICE_MEMORY;
 	}
 
+    CK_ATTRIBUTE l_template[ulCount];
+    memset_s(l_template, ulCount * sizeof(CK_ATTRIBUTE), 0x00, ulCount * sizeof(CK_ATTRIBUTE));
+    memcpy_s(l_template, ulCount * sizeof(CK_ATTRIBUTE), pTemplate, ulCount * sizeof(CK_ATTRIBUTE));
+
+    std::vector<std::vector<CK_BYTE>> value(ulCount);
+
+    for (CK_ULONG i = 0; i < ulCount; i++)
+    {
+        if (l_template[i].pValue == nullptr)
+        {
+            continue;
+        }
+
+        auto ulValueLen = l_template[i].ulValueLen;
+        if (!validate_user_check_ptr(l_template[i].pValue, ulValueLen))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        value[i].resize(ulValueLen);
+        memcpy_s(value[i].data(), ulValueLen, l_template[i].pValue, ulValueLen);
+        l_template[i].pValue = value[i].data();
+    }
+
+    auto l_pTemplate = l_template;
+
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
 #endif
 
 #ifdef SGXHSM
-    if (isRestrictedKeyAttributeValue(pTemplate, ulCount, true, hObject))
+    if (isRestrictedKeyAttributeValue(l_pTemplate, ulCount, true, hObject))
     {
        return CKR_ATTRIBUTE_TYPE_INVALID;
     }
@@ -2292,7 +2523,7 @@ CK_RV SoftHSM::C_SetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE 
     }
 
 	// Ask the P11Object to save the template with attribute values.
-	rv = p11object->saveTemplate(token, isPrivate != CK_FALSE, pTemplate,ulCount,OBJECT_OP_SET);
+	rv = p11object->saveTemplate(token, isPrivate != CK_FALSE, l_pTemplate,ulCount,OBJECT_OP_SET);
 	delete p11object;
 	return rv;
 }
@@ -2302,33 +2533,69 @@ CK_RV SoftHSM::C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pT
 {
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
+    if (ulCount > CKA_MAX_ATTRIBUTES)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    CK_ATTRIBUTE_PTR l_pTemplate = nullptr;
+    CK_ATTRIBUTE l_template[ulCount];
+    std::vector<std::vector<CK_BYTE>> value(ulCount);
+
     if (pTemplate || ulCount)
     {
         if (!validate_user_check_attribute_ptr(pTemplate, ulCount))
         {
             return CKR_DEVICE_MEMORY;
         }
-    }
 
-#ifdef ENABLE_MITIGATION
-    __builtin_ia32_lfence();
-#endif
+        memset_s(l_template, ulCount * sizeof(CK_ATTRIBUTE), 0x00, ulCount * sizeof(CK_ATTRIBUTE));
+        memcpy_s(l_template, ulCount * sizeof(CK_ATTRIBUTE), pTemplate, ulCount * sizeof(CK_ATTRIBUTE));
+
+        for (CK_ULONG i = 0; i < ulCount; i++)
+        {
+            if (l_template[i].pValue == nullptr)
+            {
+                continue;
+            }
+
+            auto ulValueLen = l_template[i].ulValueLen;
+            if (!validate_user_check_ptr(l_template[i].pValue, ulValueLen))
+            {
+                return CKR_DEVICE_MEMORY;
+            }
+
+            value[i].resize(ulValueLen);
+            memcpy_s(value[i].data(), ulValueLen, l_template[i].pValue, ulValueLen);
+            l_template[i].pValue = value[i].data();
 
 #ifdef SGXHSM
-    for (CK_ULONG i = 0; i < ulCount; i++)
-    {
-        if((pTemplate[i].type == CKA_ASYMMETRIC_PAIR_ID)) // Only from C_GenerateKeyPair or C_DestroyObject
-        {
-            return CKR_ATTRIBUTE_TYPE_INVALID;
-        }
-    }
+            if((l_template[i].type == CKA_ASYMMETRIC_PAIR_ID)) // Only from C_GenerateKeyPair or C_DestroyObject
+            {
+                return CKR_ATTRIBUTE_TYPE_INVALID;
+            }
 #endif
-    return FindObjectsInit(hSession, pTemplate, ulCount);
+        }
+
+        l_pTemplate = l_template;
+
+#ifdef ENABLE_MITIGATION
+        __builtin_ia32_lfence();
+#endif
+    }
+
+    return FindObjectsInit(hSession, l_pTemplate, ulCount);
 }
 
 // Continue the search for objects in the specified session
 CK_RV SoftHSM::C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject, CK_ULONG ulMaxObjectCount, CK_ULONG_PTR pulObjectCount)
 {
+    std::vector<CK_OBJECT_HANDLE> hObject;
+    CK_OBJECT_HANDLE_PTR l_phObject = nullptr;
+    CK_ULONG ulObjectCount;
+
+    auto l_pulObjectCount = &ulObjectCount;
+
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 	if (phObject == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	if (pulObjectCount == NULL_PTR) return CKR_ARGUMENTS_BAD;
@@ -2340,17 +2607,34 @@ CK_RV SoftHSM::C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR ph
 
 	if (ulMaxObjectCount)
 	{
+        if (ulMaxObjectCount > MAX_OBJECT_COUNT)
+        {
+            return CKR_ARGUMENTS_BAD;
+        }
+
 		if (!validate_user_check_ptr(phObject, sizeof(CK_OBJECT_HANDLE) * ulMaxObjectCount))
 		{
 			return CKR_DEVICE_MEMORY;
 		}
+
+        hObject.resize(ulMaxObjectCount);
+        l_phObject = &hObject[0];
 	}
 
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
 #endif
 
-    return FindObjects(hSession, phObject, ulMaxObjectCount, pulObjectCount);
+    auto rv = FindObjects(hSession, l_phObject, ulMaxObjectCount, l_pulObjectCount);
+
+    if ((CKR_OK == rv) && ulObjectCount && (ulObjectCount <= ulMaxObjectCount))
+    {
+        memcpy_s(phObject, ulObjectCount * sizeof(CK_OBJECT_HANDLE), &hObject[0], ulObjectCount * sizeof(CK_OBJECT_HANDLE));
+    }
+
+    *pulObjectCount = ulObjectCount;
+
+    return rv;
 }
 
 // Finish searching for objects
@@ -2758,10 +3042,35 @@ CK_RV SoftHSM::AsymEncryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMec
 // Initialise encryption using the specified object and mechanism
 CK_RV SoftHSM::C_EncryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
+    if (pMechanism == nullptr) return CKR_ARGUMENTS_BAD;
+
 	if (!validate_user_check_mechanism_ptr(pMechanism, 1))
 	{
 		return CKR_DEVICE_MEMORY;
 	}
+
+    CK_MECHANISM l_mechanism;
+    memcpy_s(&l_mechanism, sizeof(CK_MECHANISM), pMechanism, sizeof(CK_MECHANISM));
+
+    auto ulParameterLen = l_mechanism.ulParameterLen;
+
+    if (ulParameterLen > CKM_MAX_PARAMETER_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    CK_BYTE parameter[ulParameterLen];
+    if (l_mechanism.pParameter != nullptr)
+    {
+        if (!validate_user_check_ptr(l_mechanism.pParameter, ulParameterLen))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        memcpy_s(&parameter[0], ulParameterLen, l_mechanism.pParameter, ulParameterLen);
+        l_mechanism.pParameter = &parameter[0];
+    }
+    auto l_pMechanism = &l_mechanism;
 
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
@@ -2780,13 +3089,13 @@ CK_RV SoftHSM::C_EncryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMecha
     }
 #endif
 
-	if (isSymMechanism(pMechanism))
+	if (isSymMechanism(l_pMechanism))
 	{
-		return SymEncryptInit(hSession, pMechanism, hKey);
+		return SymEncryptInit(hSession, l_pMechanism, hKey);
 	}
 	else
 	{
-		return AsymEncryptInit(hSession, pMechanism, hKey);
+		return AsymEncryptInit(hSession, l_pMechanism, hKey);
 	}
 }
 
@@ -2936,6 +3245,11 @@ CK_RV SoftHSM::C_Encrypt(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG
 	if (pData == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	if (pulEncryptedDataLen == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
+    if (ulDataLen > CKM_MAX_CRYPTO_OP_INPUT_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
     if (!validate_user_check_ptr(pData, ulDataLen))
     {
         return CKR_DEVICE_MEMORY;
@@ -2946,9 +3260,12 @@ CK_RV SoftHSM::C_Encrypt(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG
         return CKR_DEVICE_MEMORY;
     }
 
-	if (pEncryptedData && *pulEncryptedDataLen)
+    CK_ULONG ulEncryptedDataLen = *pulEncryptedDataLen;
+    auto l_pulEncryptedDataLen = &ulEncryptedDataLen;
+
+	if (pEncryptedData && ulEncryptedDataLen)
 	{
-		if (!validate_user_check_ptr(pEncryptedData, *pulEncryptedDataLen))
+		if (!validate_user_check_ptr(pEncryptedData, ulEncryptedDataLen))
 		{
 			return CKR_DEVICE_MEMORY;
 		}
@@ -2966,12 +3283,17 @@ CK_RV SoftHSM::C_Encrypt(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG
 	if (session->getOpType() != SESSION_OP_ENCRYPT)
 		return CKR_OPERATION_NOT_INITIALIZED;
 
+    CK_RV rv;
 	if (session->getSymmetricCryptoOp() != NULL)
-		return SymEncrypt(session, pData, ulDataLen,
-				  pEncryptedData, pulEncryptedDataLen);
+		rv = SymEncrypt(session, pData, ulDataLen,
+				  pEncryptedData, l_pulEncryptedDataLen);
 	else
-		return AsymEncrypt(session, pData, ulDataLen,
-				   pEncryptedData, pulEncryptedDataLen);
+		rv = AsymEncrypt(session, pData, ulDataLen,
+				   pEncryptedData, l_pulEncryptedDataLen);
+
+    *pulEncryptedDataLen = ulEncryptedDataLen;
+
+    return rv;
 }
 
 // SymAlgorithm version of C_EncryptUpdate
@@ -3049,11 +3371,18 @@ static CK_RV SymEncryptUpdate(Session* session, CK_BYTE_PTR pData, CK_ULONG ulDa
 // Feed data to the running encryption operation in a session
 CK_RV SoftHSM::C_EncryptUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_PTR pEncryptedData, CK_ULONG_PTR pulEncryptedDataLen)
 {
+    CK_ULONG ulEncryptedDataLen;
+    auto l_pulEncryptedDataLen = &ulEncryptedDataLen;
+
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
 	if (pData == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	if (pulEncryptedDataLen == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
+    if (ulDataLen > CKM_MAX_CRYPTO_OP_INPUT_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
 
     if (!validate_user_check_ptr(pData, ulDataLen))
     {
@@ -3065,9 +3394,11 @@ CK_RV SoftHSM::C_EncryptUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK
         return CKR_DEVICE_MEMORY;
     }
 
-	if (pEncryptedData && *pulEncryptedDataLen)
+    ulEncryptedDataLen = *pulEncryptedDataLen;
+
+	if (pEncryptedData && ulEncryptedDataLen)
 	{
-		if (!validate_user_check_ptr(pEncryptedData, *pulEncryptedDataLen))
+		if (!validate_user_check_ptr(pEncryptedData, ulEncryptedDataLen))
 		{
 			return CKR_DEVICE_MEMORY;
 		}
@@ -3085,11 +3416,17 @@ CK_RV SoftHSM::C_EncryptUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK
 	if (session->getOpType() != SESSION_OP_ENCRYPT)
 		return CKR_OPERATION_NOT_INITIALIZED;
 
+    CK_RV rv;
 	if (session->getSymmetricCryptoOp() != NULL)
-		return SymEncryptUpdate(session, pData, ulDataLen,
-				  pEncryptedData, pulEncryptedDataLen);
+    {
+		rv = SymEncryptUpdate(session, pData, ulDataLen,
+				  pEncryptedData, l_pulEncryptedDataLen);
+    }
 	else
 		return CKR_FUNCTION_NOT_SUPPORTED;
+
+    *pulEncryptedDataLen = ulEncryptedDataLen;
+    return rv;
 }
 
 // SymAlgorithm version of C_EncryptFinal
@@ -3170,14 +3507,18 @@ CK_RV SoftHSM::C_EncryptFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pEncrypted
 {
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
+    if (pulEncryptedDataLen == nullptr) return CKR_ARGUMENTS_BAD;
     if (!validate_user_check_ptr(pulEncryptedDataLen, sizeof(CK_ULONG)))
     {
         return CKR_DEVICE_MEMORY;
     }
 
-	if (pEncryptedData && *pulEncryptedDataLen)
+    CK_ULONG ulEncryptedDataLen = *pulEncryptedDataLen;
+    auto l_pulEncryptedDataLen = &ulEncryptedDataLen;
+
+	if (pEncryptedData && ulEncryptedDataLen)
 	{
-		if (!validate_user_check_ptr(pEncryptedData, *pulEncryptedDataLen))
+		if (!validate_user_check_ptr(pEncryptedData, ulEncryptedDataLen))
 		{
 			return CKR_DEVICE_MEMORY;
 		}
@@ -3194,10 +3535,15 @@ CK_RV SoftHSM::C_EncryptFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pEncrypted
 	// Check if we are doing the correct operation
 	if (session->getOpType() != SESSION_OP_ENCRYPT) return CKR_OPERATION_NOT_INITIALIZED;
 
+    CK_RV rv;
 	if (session->getSymmetricCryptoOp() != NULL)
-		return SymEncryptFinal(session, pEncryptedData, pulEncryptedDataLen);
+		rv = SymEncryptFinal(session, pEncryptedData, l_pulEncryptedDataLen);
 	else
-		return CKR_FUNCTION_NOT_SUPPORTED;
+		rv = CKR_FUNCTION_NOT_SUPPORTED;
+
+    *pulEncryptedDataLen = ulEncryptedDataLen;
+
+    return rv;
 }
 
 // SymAlgorithm version of C_DecryptInit
@@ -3468,7 +3814,6 @@ CK_RV SoftHSM::AsymDecryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMec
 
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
-
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
 	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
@@ -3589,10 +3934,35 @@ CK_RV SoftHSM::AsymDecryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMec
 // Initialise decryption using the specified object
 CK_RV SoftHSM::C_DecryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
+    if (pMechanism == nullptr) return CKR_ARGUMENTS_BAD;
+
 	if (!validate_user_check_mechanism_ptr(pMechanism, 1))
 	{
 		return CKR_DEVICE_MEMORY;
 	}
+
+    CK_MECHANISM l_mechanism;
+    memcpy_s(&l_mechanism, sizeof(CK_MECHANISM), pMechanism, sizeof(CK_MECHANISM));
+
+    auto ulParameterLen = l_mechanism.ulParameterLen;
+
+    if (ulParameterLen > CKM_MAX_PARAMETER_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    CK_BYTE parameter[ulParameterLen];
+    if (l_mechanism.pParameter != nullptr)
+    {
+        if (!validate_user_check_ptr(l_mechanism.pParameter, ulParameterLen))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        memcpy_s(&parameter[0], ulParameterLen, l_mechanism.pParameter, ulParameterLen);
+        l_mechanism.pParameter = &parameter[0];
+    }
+    auto l_pMechanism = &l_mechanism;
 
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
@@ -3610,13 +3980,13 @@ CK_RV SoftHSM::C_DecryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMecha
     }
 #endif
 
-    if (isSymMechanism(pMechanism))
+    if (isSymMechanism(l_pMechanism))
     {
-        return SymDecryptInit(hSession, pMechanism, hKey);
+        return SymDecryptInit(hSession, l_pMechanism, hKey);
     }
     else
     {
-        return AsymDecryptInit(hSession, pMechanism, hKey);
+        return AsymDecryptInit(hSession, l_pMechanism, hKey);
     }
 }
 
@@ -3761,19 +4131,27 @@ CK_RV SoftHSM::C_Decrypt(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pEncryptedData,
 	if (pEncryptedData == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	if (pulDataLen == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
+    if (ulEncryptedDataLen > CKM_MAX_CRYPTO_OP_INPUT_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
     if (!validate_user_check_ptr(pEncryptedData, ulEncryptedDataLen))
     {
         return CKR_DEVICE_MEMORY;
     }
+
+    auto ulDataLen = *pulDataLen;
+    auto l_pulDataLen = &ulDataLen;
 
     if (!validate_user_check_ptr(pulDataLen, sizeof(CK_ULONG)))
     {
         return CKR_DEVICE_MEMORY;
     }
 
-    if (pData && *pulDataLen) 
+    if (pData && ulDataLen) 
 	{
-		if (!validate_user_check_ptr(pData, *pulDataLen))
+		if (!validate_user_check_ptr(pData, ulDataLen))
 		{
 			return CKR_DEVICE_MEMORY;
 		}
@@ -3791,12 +4169,17 @@ CK_RV SoftHSM::C_Decrypt(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pEncryptedData,
 	if (session->getOpType() != SESSION_OP_DECRYPT)
 		return CKR_OPERATION_NOT_INITIALIZED;
 
+    CK_RV rv;
 	if (session->getSymmetricCryptoOp() != NULL)
-		return SymDecrypt(session, pEncryptedData, ulEncryptedDataLen,
-				  pData, pulDataLen);
+		rv = SymDecrypt(session, pEncryptedData, ulEncryptedDataLen,
+				  pData, l_pulDataLen);
 	else
-		return AsymDecrypt(session, pEncryptedData, ulEncryptedDataLen,
-				   pData, pulDataLen);
+		rv = AsymDecrypt(session, pEncryptedData, ulEncryptedDataLen,
+				   pData, l_pulDataLen);
+
+    *pulDataLen = ulDataLen;
+
+    return rv;
 }
 
 // SymAlgorithm version of C_DecryptUpdate
@@ -3883,6 +4266,11 @@ CK_RV SoftHSM::C_DecryptUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pEncrypte
 	if (pEncryptedData == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	if (pDataLen == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
+    if (ulEncryptedDataLen > CKM_MAX_CRYPTO_OP_INPUT_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
     if (!validate_user_check_ptr(pEncryptedData, ulEncryptedDataLen))
     {
         return CKR_DEVICE_MEMORY;
@@ -3893,9 +4281,12 @@ CK_RV SoftHSM::C_DecryptUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pEncrypte
         return CKR_DEVICE_MEMORY;
     }
 
-    if (pData && *pDataLen) 
+    auto ulDataLen = *pDataLen;
+    auto l_pDataLen = &ulDataLen;
+
+    if (pData && ulDataLen) 
 	{
-		if (!validate_user_check_ptr(pData, *pDataLen))
+		if (!validate_user_check_ptr(pData, ulDataLen))
 		{
 			return CKR_DEVICE_MEMORY;
 		}
@@ -3913,11 +4304,16 @@ CK_RV SoftHSM::C_DecryptUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pEncrypte
 	if (session->getOpType() != SESSION_OP_DECRYPT)
 		return CKR_OPERATION_NOT_INITIALIZED;
 
+    CK_RV rv;
 	if (session->getSymmetricCryptoOp() != NULL)
-		return SymDecryptUpdate(session, pEncryptedData, ulEncryptedDataLen,
-				  pData, pDataLen);
+		rv = SymDecryptUpdate(session, pEncryptedData, ulEncryptedDataLen,
+				  pData, l_pDataLen);
 	else
-		return CKR_FUNCTION_NOT_SUPPORTED;
+		rv = CKR_FUNCTION_NOT_SUPPORTED;
+
+    *pDataLen = ulDataLen;
+
+    return rv;
 }
 
 static CK_RV SymDecryptFinal(Session* session, CK_BYTE_PTR pDecryptedData, CK_ULONG_PTR pulDecryptedDataLen)
@@ -4002,9 +4398,12 @@ CK_RV SoftHSM::C_DecryptFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_
 		return CKR_DEVICE_MEMORY;
 	}
 
-	if (pData && *pDataLen)
+    auto ulDataLen = *pDataLen;
+    auto l_pDataLen = &ulDataLen;
+
+	if (pData && ulDataLen)
 	{
-		if (!validate_user_check_ptr(pData, *pDataLen))
+		if (!validate_user_check_ptr(pData, ulDataLen))
 		{
 			return CKR_DEVICE_MEMORY;
 		}
@@ -4021,10 +4420,15 @@ CK_RV SoftHSM::C_DecryptFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_
 	// Check if we are doing the correct operation
 	if (session->getOpType() != SESSION_OP_DECRYPT) return CKR_OPERATION_NOT_INITIALIZED;
 
+    CK_RV rv;
 	if (session->getSymmetricCryptoOp() != NULL)
-		return SymDecryptFinal(session, pData, pDataLen);
+		rv = SymDecryptFinal(session, pData, l_pDataLen);
 	else
-		return CKR_FUNCTION_NOT_SUPPORTED;
+		rv = CKR_FUNCTION_NOT_SUPPORTED;
+
+    *pDataLen = ulDataLen;
+
+    return rv;
 }
 
 // Initialise digesting using the specified mechanism in the specified session
@@ -4032,13 +4436,39 @@ CK_RV SoftHSM::C_DigestInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 {
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
-	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
+    if (pMechanism == nullptr) return CKR_ARGUMENTS_BAD;
 
-    if (!validate_user_check_mechanism_ptr(pMechanism, 1))
+	if (!validate_user_check_mechanism_ptr(pMechanism, 1))
+	{
+		return CKR_DEVICE_MEMORY;
+	}
+
+    CK_MECHANISM l_mechanism;
+    memcpy_s(&l_mechanism, sizeof(CK_MECHANISM), pMechanism, sizeof(CK_MECHANISM));
+
+    auto ulParameterLen = l_mechanism.ulParameterLen;
+
+    if (ulParameterLen > CKM_MAX_PARAMETER_LEN)
     {
-        return CKR_DEVICE_MEMORY;
+        return CKR_ARGUMENTS_BAD;
     }
+
+    CK_BYTE parameter[ulParameterLen];
+    if (l_mechanism.pParameter != nullptr)
+    {
+        if (!validate_user_check_ptr(l_mechanism.pParameter, ulParameterLen))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        memcpy_s(&parameter[0], ulParameterLen, l_mechanism.pParameter, ulParameterLen);
+        l_mechanism.pParameter = &parameter[0];
+    }
+    auto l_pMechanism = &l_mechanism;
+
+#ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -4049,7 +4479,7 @@ CK_RV SoftHSM::C_DigestInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 
 	// Get the mechanism
 	HashAlgo::Type algo = HashAlgo::Unknown;
-	switch(pMechanism->mechanism) {
+	switch(l_pMechanism->mechanism) {
 #if 0 // Unsupported by Crypto API Toolkit
 #ifndef WITH_FIPS
 		case CKM_MD5:
@@ -4107,6 +4537,11 @@ CK_RV SoftHSM::C_Digest(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG 
 	if (pulDigestLen == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	if (pData == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
+    if (ulDataLen > CKM_MAX_CRYPTO_OP_INPUT_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
     if (!validate_user_check_ptr(pData, ulDataLen))
     {
         return CKR_DEVICE_MEMORY;
@@ -4117,15 +4552,19 @@ CK_RV SoftHSM::C_Digest(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG 
         return CKR_DEVICE_MEMORY;
     }
 
-    if (pDigest && *pulDigestLen)
+    CK_ULONG ulDigestLen = *pulDigestLen;
+
+    if (pDigest && ulDigestLen)
     {
-        if (!validate_user_check_ptr(pDigest, *pulDigestLen))
+        if (!validate_user_check_ptr(pDigest, ulDigestLen))
         {
             return CKR_DEVICE_MEMORY;
         }
     }
 
+#ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -4143,7 +4582,7 @@ CK_RV SoftHSM::C_Digest(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG 
 	}
 
 	// Check buffer size
-	if (*pulDigestLen < size)
+	if (ulDigestLen < size)
 	{
 		*pulDigestLen = size;
 		return CKR_BUFFER_TOO_SMALL;
@@ -4174,7 +4613,7 @@ CK_RV SoftHSM::C_Digest(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG 
 		session->resetOp();
 		return CKR_GENERAL_ERROR;
 	}
-    memcpy_s(pDigest, *pulDigestLen, digest.byte_str(), size);
+    memcpy_s(pDigest, ulDigestLen, digest.byte_str(), size);
 	*pulDigestLen = size;
 
 	session->resetOp();
@@ -4188,6 +4627,11 @@ CK_RV SoftHSM::C_DigestUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
 	if (pPart == NULL_PTR) return CKR_ARGUMENTS_BAD;
+
+    if (ulPartLen > CKM_MAX_CRYPTO_OP_INPUT_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
 
     if (!validate_user_check_ptr(pPart, ulPartLen))
     {
@@ -4310,15 +4754,19 @@ CK_RV SoftHSM::C_DigestFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pDigest, CK
         return CKR_DEVICE_MEMORY;
     }
 
-    if (pDigest && *pulDigestLen)
+    CK_ULONG ulDigestLen = *pulDigestLen;
+
+    if (pDigest && ulDigestLen)
     {
-        if (!validate_user_check_ptr(pDigest, *pulDigestLen))
+        if (!validate_user_check_ptr(pDigest, ulDigestLen))
         {
             return CKR_DEVICE_MEMORY;
         }
     }
 
+#ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
+#endif
 
 	// Get the session
 	Session* session = (Session*)handleManager->getSession(hSession);
@@ -4336,7 +4784,7 @@ CK_RV SoftHSM::C_DigestFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pDigest, CK
 	}
 
 	// Check buffer size
-	if (*pulDigestLen < size)
+	if (ulDigestLen < size)
 	{
 		*pulDigestLen = size;
 		return CKR_BUFFER_TOO_SMALL;
@@ -4357,7 +4805,7 @@ CK_RV SoftHSM::C_DigestFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pDigest, CK
 		session->resetOp();
 		return CKR_GENERAL_ERROR;
 	}
-    memcpy_s(pDigest, *pulDigestLen, digest.byte_str(), size);
+    memcpy_s(pDigest, ulDigestLen, digest.byte_str(), size);
 	*pulDigestLen = size;
 
 	session->resetOp();
@@ -5000,10 +5448,35 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 // Initialise a signing operation using the specified key and mechanism
 CK_RV SoftHSM::C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
+    if (pMechanism == nullptr) return CKR_ARGUMENTS_BAD;
+
 	if (!validate_user_check_mechanism_ptr(pMechanism, 1))
 	{
 		return CKR_DEVICE_MEMORY;
 	}
+
+    CK_MECHANISM l_mechanism;
+    memcpy_s(&l_mechanism, sizeof(CK_MECHANISM), pMechanism, sizeof(CK_MECHANISM));
+
+    auto ulParameterLen = l_mechanism.ulParameterLen;
+
+    if (ulParameterLen > CKM_MAX_PARAMETER_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    CK_BYTE parameter[ulParameterLen];
+    if (l_mechanism.pParameter != nullptr)
+    {
+        if (!validate_user_check_ptr(l_mechanism.pParameter, ulParameterLen))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        memcpy_s(&parameter[0], ulParameterLen, l_mechanism.pParameter, ulParameterLen);
+        l_mechanism.pParameter = &parameter[0];
+    }
+    auto l_pMechanism = &l_mechanism;
 
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
@@ -5036,10 +5509,10 @@ CK_RV SoftHSM::C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanis
     }
 #endif
 
-	if (isMacMechanism(pMechanism))
-		return MacSignInit(hSession, pMechanism, hKey);
+	if (isMacMechanism(l_pMechanism))
+		return MacSignInit(hSession, l_pMechanism, hKey);
 	else
-		return AsymSignInit(hSession, pMechanism, hKey);
+		return AsymSignInit(hSession, l_pMechanism, hKey);
 }
 
 // MacAlgorithm version of C_Sign
@@ -5185,6 +5658,11 @@ CK_RV SoftHSM::C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ul
 	if (pData == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	if (pulSignatureLen == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
+    if (ulDataLen > CKM_MAX_CRYPTO_OP_INPUT_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
 	if (!validate_user_check_ptr(pData, ulDataLen))
 	{
 		return CKR_DEVICE_MEMORY;
@@ -5195,9 +5673,12 @@ CK_RV SoftHSM::C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ul
 		return CKR_DEVICE_MEMORY;
 	}
 
-	if (pSignature && *pulSignatureLen)
+    CK_ULONG ulSignatureLen = *pulSignatureLen;
+    auto l_pulSignatureLen = &ulSignatureLen;
+
+	if (pSignature && ulSignatureLen)
 	{
-		if (!validate_user_check_ptr(pSignature, *pulSignatureLen))
+		if (!validate_user_check_ptr(pSignature, ulSignatureLen))
 		{
 			return CKR_DEVICE_MEMORY;
 		}
@@ -5215,12 +5696,17 @@ CK_RV SoftHSM::C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ul
 	if (session->getOpType() != SESSION_OP_SIGN)
 		return CKR_OPERATION_NOT_INITIALIZED;
 
+    CK_RV rv;
 	if (session->getMacOp() != NULL)
-		return MacSign(session, pData, ulDataLen,
-			       pSignature, pulSignatureLen);
+		rv = MacSign(session, pData, ulDataLen,
+			       pSignature, l_pulSignatureLen);
 	else
-		return AsymSign(session, pData, ulDataLen,
-				pSignature, pulSignatureLen);
+		rv = AsymSign(session, pData, ulDataLen,
+				pSignature, l_pulSignatureLen);
+
+    *pulSignatureLen = ulSignatureLen;
+
+    return rv;
 }
 
 // MacAlgorithm version of C_SignUpdate
@@ -5284,6 +5770,11 @@ CK_RV SoftHSM::C_SignUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_UL
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
 	if (pPart == NULL_PTR) return CKR_ARGUMENTS_BAD;
+
+    if (ulPartLen > CKM_MAX_CRYPTO_OP_INPUT_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
 
     if (!validate_user_check_ptr(pPart, ulPartLen))
     {
@@ -5422,9 +5913,12 @@ CK_RV SoftHSM::C_SignFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, C
         return CKR_DEVICE_MEMORY;
     }
 
-	if (pSignature && *pulSignatureLen)
+    CK_ULONG ulSignatureLen = *pulSignatureLen;
+    auto l_pulSignatureLen = &ulSignatureLen;
+
+	if (pSignature && ulSignatureLen)
 	{
-		if (!validate_user_check_ptr(pSignature, *pulSignatureLen))
+		if (!validate_user_check_ptr(pSignature, ulSignatureLen))
 		{
 			return CKR_DEVICE_MEMORY;
 		}
@@ -5442,10 +5936,15 @@ CK_RV SoftHSM::C_SignFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, C
 	if (session->getOpType() != SESSION_OP_SIGN || !session->getAllowMultiPartOp())
 		return CKR_OPERATION_NOT_INITIALIZED;
 
+    CK_RV rv;
 	if (session->getMacOp() != NULL)
-		return MacSignFinal(session, pSignature, pulSignatureLen);
+		rv = MacSignFinal(session, pSignature, l_pulSignatureLen);
 	else
-		return AsymSignFinal(session, pSignature, pulSignatureLen);
+		rv = AsymSignFinal(session, pSignature, l_pulSignatureLen);
+
+    *pulSignatureLen = ulSignatureLen;
+
+    return rv;
 }
 
 // Initialise a signing operation that allows recovery of the signed data
@@ -6074,10 +6573,35 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 // Initialise a verification operation using the specified key and mechanism
 CK_RV SoftHSM::C_VerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
+    if (pMechanism == nullptr) return CKR_ARGUMENTS_BAD;
+
 	if (!validate_user_check_mechanism_ptr(pMechanism, 1))
 	{
 		return CKR_DEVICE_MEMORY;
 	}
+
+    CK_MECHANISM l_mechanism;
+    memcpy_s(&l_mechanism, sizeof(CK_MECHANISM), pMechanism, sizeof(CK_MECHANISM));
+
+    auto ulParameterLen = l_mechanism.ulParameterLen;
+
+    if (ulParameterLen > CKM_MAX_PARAMETER_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    CK_BYTE parameter[ulParameterLen];
+    if (l_mechanism.pParameter != nullptr)
+    {
+        if (!validate_user_check_ptr(l_mechanism.pParameter, ulParameterLen))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        memcpy_s(&parameter[0], ulParameterLen, l_mechanism.pParameter, ulParameterLen);
+        l_mechanism.pParameter = &parameter[0];
+    }
+    auto l_pMechanism = &l_mechanism;
 
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
@@ -6110,10 +6634,10 @@ CK_RV SoftHSM::C_VerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
     }
 #endif
 
-	if (isMacMechanism(pMechanism))
-		return MacVerifyInit(hSession, pMechanism, hKey);
+	if (isMacMechanism(l_pMechanism))
+		return MacVerifyInit(hSession, l_pMechanism, hKey);
 	else
-		return AsymVerifyInit(hSession, pMechanism, hKey);
+		return AsymVerifyInit(hSession, l_pMechanism, hKey);
 }
 
 // MacAlgorithm version of C_Verify
@@ -6225,6 +6749,11 @@ CK_RV SoftHSM::C_Verify(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG 
 	if (pData == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	if (pSignature == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
+    if (ulDataLen > CKM_MAX_CRYPTO_OP_INPUT_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
     if (!validate_user_check_ptr(pData, ulDataLen))
     {
         return CKR_DEVICE_MEMORY;
@@ -6314,6 +6843,11 @@ CK_RV SoftHSM::C_VerifyUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
 	if (pPart == NULL_PTR) return CKR_ARGUMENTS_BAD;
+
+    if (ulPartLen > CKM_MAX_CRYPTO_OP_INPUT_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
 
     if (!validate_user_check_ptr(pPart, ulPartLen))
     {
@@ -6520,6 +7054,9 @@ CK_RV SoftHSM::C_DecryptVerifyUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR /*p
 // Generate a secret key or a domain parameter set using the specified mechanism
 CK_RV SoftHSM::C_GenerateKey(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount, CK_OBJECT_HANDLE_PTR phKey)
 {
+    CK_OBJECT_HANDLE hKey;
+    auto l_phKey = &hKey;
+
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
@@ -6536,15 +7073,69 @@ CK_RV SoftHSM::C_GenerateKey(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMecha
         return CKR_DEVICE_MEMORY;
     }
 
-	if (!validate_user_check_mechanism_ptr(pMechanism, 1))
-	{
-		return CKR_DEVICE_MEMORY;
-	}
+    if (ulCount > CKA_MAX_ATTRIBUTES)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
 
 	if (ulCount && !validate_user_check_attribute_ptr(pTemplate, ulCount))
 	{
 		return CKR_DEVICE_MEMORY;
 	}
+
+    CK_ATTRIBUTE l_template[ulCount];
+    memset_s(l_template, ulCount * sizeof(CK_ATTRIBUTE), 0x00, ulCount * sizeof(CK_ATTRIBUTE));
+    memcpy_s(l_template, ulCount * sizeof(CK_ATTRIBUTE), pTemplate, ulCount * sizeof(CK_ATTRIBUTE));
+
+    std::vector<std::vector<CK_BYTE>> value(ulCount);
+
+    for (CK_ULONG i = 0; i < ulCount; i++)
+    {
+        if (l_template[i].pValue == nullptr)
+        {
+            continue;
+        }
+
+        auto ulValueLen = l_template[i].ulValueLen;
+        if (!validate_user_check_ptr(l_template[i].pValue, ulValueLen))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        value[i].resize(ulValueLen);
+        memcpy_s(value[i].data(), ulValueLen, l_template[i].pValue, ulValueLen);
+        l_template[i].pValue = value[i].data();
+    }
+
+    auto l_pTemplate = l_template;
+
+	if (!validate_user_check_mechanism_ptr(pMechanism, 1))
+	{
+		return CKR_DEVICE_MEMORY;
+	}
+
+    CK_MECHANISM l_mechanism;
+    memcpy_s(&l_mechanism, sizeof(CK_MECHANISM), pMechanism, sizeof(CK_MECHANISM));
+
+    auto ulParameterLen = l_mechanism.ulParameterLen;
+
+    if (ulParameterLen > CKM_MAX_PARAMETER_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    CK_BYTE parameter[ulParameterLen];
+    if (l_mechanism.pParameter != nullptr)
+    {
+        if (!validate_user_check_ptr(l_mechanism.pParameter, ulParameterLen))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        memcpy_s(&parameter[0], ulParameterLen, l_mechanism.pParameter, ulParameterLen);
+        l_mechanism.pParameter = &parameter[0];
+    }
+    auto l_pMechanism = &l_mechanism;
 
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
@@ -6558,7 +7149,7 @@ CK_RV SoftHSM::C_GenerateKey(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMecha
 	// and symmetric ciphers
 	CK_OBJECT_CLASS objClass;
 	CK_KEY_TYPE keyType;
-	switch (pMechanism->mechanism)
+	switch (l_pMechanism->mechanism)
 	{
 #if 0 // Unsupported by Crypto API Toolkit
 		case CKM_DSA_PARAMETER_GEN:
@@ -6603,31 +7194,31 @@ CK_RV SoftHSM::C_GenerateKey(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMecha
 	CK_BBOOL isPrivate = CK_TRUE;
 	CK_CERTIFICATE_TYPE dummy;
 	bool isImplicit = true;
-	extractObjectInformation(pTemplate, ulCount, objClass, keyType, dummy, isOnToken, isPrivate, isImplicit);
+	extractObjectInformation(l_pTemplate, ulCount, objClass, keyType, dummy, isOnToken, isPrivate, isImplicit);
 
 	// Report errors and/or unexpected usage.
 	if (objClass != CKO_SECRET_KEY && objClass != CKO_DOMAIN_PARAMETERS)
 		return CKR_ATTRIBUTE_VALUE_INVALID;
-	if (pMechanism->mechanism == CKM_DSA_PARAMETER_GEN &&
+	if (l_pMechanism->mechanism == CKM_DSA_PARAMETER_GEN &&
 	    (objClass != CKO_DOMAIN_PARAMETERS || keyType != CKK_DSA))
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_DH_PKCS_PARAMETER_GEN &&
+	if (l_pMechanism->mechanism == CKM_DH_PKCS_PARAMETER_GEN &&
 	    (objClass != CKO_DOMAIN_PARAMETERS || keyType != CKK_DH))
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_DES_KEY_GEN &&
+	if (l_pMechanism->mechanism == CKM_DES_KEY_GEN &&
 	    (objClass != CKO_SECRET_KEY || keyType != CKK_DES))
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_DES2_KEY_GEN &&
+	if (l_pMechanism->mechanism == CKM_DES2_KEY_GEN &&
 	    (objClass != CKO_SECRET_KEY || keyType != CKK_DES2))
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_DES3_KEY_GEN &&
+	if (l_pMechanism->mechanism == CKM_DES3_KEY_GEN &&
 	    (objClass != CKO_SECRET_KEY || keyType != CKK_DES3))
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_AES_KEY_GEN &&
+	if (l_pMechanism->mechanism == CKM_AES_KEY_GEN &&
 	    (objClass != CKO_SECRET_KEY || keyType != CKK_AES))
 		return CKR_TEMPLATE_INCONSISTENT;
 #if 0 // Unsupported by Crypto API Toolkit
-	if (pMechanism->mechanism == CKM_GENERIC_SECRET_KEY_GEN &&
+	if (l_pMechanism->mechanism == CKM_GENERIC_SECRET_KEY_GEN &&
 	    (objClass != CKO_SECRET_KEY || keyType != CKK_GENERIC_SECRET))
 		return CKR_TEMPLATE_INCONSISTENT;
 #endif // Unsupported by Crypto API Toolkit
@@ -6650,47 +7241,61 @@ CK_RV SoftHSM::C_GenerateKey(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMecha
 
 #if 0 // Unsupported by Crypto API Toolkit
 	// Generate DSA domain parameters
-	if (pMechanism->mechanism == CKM_DSA_PARAMETER_GEN)
+	if (l_pMechanism->mechanism == CKM_DSA_PARAMETER_GEN)
 	{
-		return this->generateDSAParameters(hSession, pTemplate, ulCount, phKey, isOnToken, isPrivate);
+		rv = this->generateDSAParameters(hSession, l_pTemplate, ulCount, l_phKey, isOnToken, isPrivate);
+        *phKey = hKey;
+        return rv;
 	}
 
 	// Generate DH domain parameters
-	if (pMechanism->mechanism == CKM_DH_PKCS_PARAMETER_GEN)
+	if (l_pMechanism->mechanism == CKM_DH_PKCS_PARAMETER_GEN)
 	{
-		return this->generateDHParameters(hSession, pTemplate, ulCount, phKey, isOnToken, isPrivate);
+		rv = this->generateDHParameters(hSession, l_pTemplate, ulCount, l_phKey, isOnToken, isPrivate);
+        *phKey = hKey;
+        return rv;
 	}
 
 	// Generate DES secret key
-	if (pMechanism->mechanism == CKM_DES_KEY_GEN)
+	if (l_pMechanism->mechanism == CKM_DES_KEY_GEN)
 	{
-		return this->generateDES(hSession, pTemplate, ulCount, phKey, isOnToken, isPrivate);
+		rv = this->generateDES(hSession, l_pTemplate, ulCount, l_phKey, isOnToken, isPrivate);
+        *phKey = hKey;
+        return rv;
 	}
 
 	// Generate DES2 secret key
-	if (pMechanism->mechanism == CKM_DES2_KEY_GEN)
+	if (l_pMechanism->mechanism == CKM_DES2_KEY_GEN)
 	{
-		return this->generateDES2(hSession, pTemplate, ulCount, phKey, isOnToken, isPrivate);
+		rv = this->generateDES2(hSession, l_pTemplate, ulCount, l_phKey, isOnToken, isPrivate);
+        *phKey = hKey;
+        return rv;
 	}
 
 	// Generate DES3 secret key
-	if (pMechanism->mechanism == CKM_DES3_KEY_GEN)
+	if (l_pMechanism->mechanism == CKM_DES3_KEY_GEN)
 	{
-		return this->generateDES3(hSession, pTemplate, ulCount, phKey, isOnToken, isPrivate);
+		rv = this->generateDES3(hSession, l_pTemplate, ulCount, l_phKey, isOnToken, isPrivate);
+        *phKey = hKey;
+        return rv;
 	}
 #endif // Unsupported by Crypto API Toolkit
 
 	// Generate AES secret key
-	if (pMechanism->mechanism == CKM_AES_KEY_GEN)
+	if (l_pMechanism->mechanism == CKM_AES_KEY_GEN)
 	{
-		return this->generateAES(hSession, pTemplate, ulCount, phKey, isOnToken, isPrivate);
+		rv = this->generateAES(hSession, l_pTemplate, ulCount, l_phKey, isOnToken, isPrivate);
+        *phKey = hKey;
+        return rv;
 	}
 
 #if 0 // Unsupported by Crypto API Toolkit
 	// Generate generic secret key
-	if (pMechanism->mechanism == CKM_GENERIC_SECRET_KEY_GEN)
+	if (l_pMechanism->mechanism == CKM_GENERIC_SECRET_KEY_GEN)
 	{
-		return this->generateGeneric(hSession, pTemplate, ulCount, phKey, isOnToken, isPrivate);
+		rv = this->generateGeneric(hSession, l_pTemplate, ulCount, l_phKey, isOnToken, isPrivate);
+        *phKey = hKey;
+        return rv;
 	}
 #endif // Unsupported by Crypto API Toolkit
 
@@ -6710,6 +7315,12 @@ CK_RV SoftHSM::C_GenerateKeyPair
 	CK_OBJECT_HANDLE_PTR phPrivateKey
 )
 {
+    CK_OBJECT_HANDLE hPublicKey;
+    auto l_phPublicKey = &hPublicKey;
+
+    CK_OBJECT_HANDLE hPrivateKey;
+    auto l_phPrivateKey = &hPrivateKey;
+
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
@@ -6732,13 +7343,13 @@ CK_RV SoftHSM::C_GenerateKeyPair
         return CKR_DEVICE_MEMORY;
     }
 
-	if (!validate_user_check_mechanism_ptr(pMechanism, 1))
-	{
-		return CKR_DEVICE_MEMORY;
-	}
-
 	if (ulPublicKeyAttributeCount)
 	{
+        if (ulPublicKeyAttributeCount > CKA_MAX_ATTRIBUTES)
+        {
+            return CKR_ARGUMENTS_BAD;
+        }
+
 		if (!validate_user_check_attribute_ptr(pPublicKeyTemplate, ulPublicKeyAttributeCount))
 		{
 			return CKR_DEVICE_MEMORY;
@@ -6752,11 +7363,96 @@ CK_RV SoftHSM::C_GenerateKeyPair
 
 	if (ulPrivateKeyAttributeCount)
 	{
+        if (ulPrivateKeyAttributeCount > CKA_MAX_ATTRIBUTES)
+        {
+            return CKR_ARGUMENTS_BAD;
+        }
+
 		if (!validate_user_check_attribute_ptr(pPrivateKeyTemplate, ulPrivateKeyAttributeCount))
 		{
 			return CKR_DEVICE_MEMORY;
 		}
 	}
+
+    CK_ATTRIBUTE l_PublicKeyTemplate[ulPublicKeyAttributeCount];
+    memset_s(l_PublicKeyTemplate, ulPublicKeyAttributeCount * sizeof(CK_ATTRIBUTE), 0x00, ulPublicKeyAttributeCount * sizeof(CK_ATTRIBUTE));
+    memcpy_s(l_PublicKeyTemplate, ulPublicKeyAttributeCount * sizeof(CK_ATTRIBUTE), pPublicKeyTemplate, ulPublicKeyAttributeCount * sizeof(CK_ATTRIBUTE));
+
+    std::vector<std::vector<CK_BYTE>> publicValue(ulPublicKeyAttributeCount);
+
+    for (CK_ULONG i = 0; i < ulPublicKeyAttributeCount; i++)
+    {
+        if (l_PublicKeyTemplate[i].pValue == nullptr)
+        {
+            continue;
+        }
+
+        auto ulValueLen = l_PublicKeyTemplate[i].ulValueLen;
+		if (!validate_user_check_ptr(l_PublicKeyTemplate[i].pValue, ulValueLen))
+		{
+			return CKR_DEVICE_MEMORY;
+		}
+
+        publicValue[i].resize(ulValueLen);
+        memcpy_s(publicValue[i].data(), ulValueLen, l_PublicKeyTemplate[i].pValue, ulValueLen);
+        l_PublicKeyTemplate[i].pValue = publicValue[i].data();
+    }
+
+    auto l_pPublicKeyTemplate= l_PublicKeyTemplate;
+
+    CK_ATTRIBUTE l_PrivateKeyTemplate[ulPrivateKeyAttributeCount];
+    memset_s(l_PrivateKeyTemplate, ulPrivateKeyAttributeCount * sizeof(CK_ATTRIBUTE), 0x00, ulPrivateKeyAttributeCount * sizeof(CK_ATTRIBUTE));
+    memcpy_s(l_PrivateKeyTemplate, ulPrivateKeyAttributeCount * sizeof(CK_ATTRIBUTE), pPrivateKeyTemplate, ulPrivateKeyAttributeCount * sizeof(CK_ATTRIBUTE));
+
+    std::vector<std::vector<CK_BYTE>> privateValue(ulPrivateKeyAttributeCount);
+
+    for (CK_ULONG i = 0; i < ulPrivateKeyAttributeCount; i++)
+    {
+        if (l_PrivateKeyTemplate[i].pValue == nullptr)
+        {
+            continue;
+        }
+
+        auto ulValueLen = l_PrivateKeyTemplate[i].ulValueLen;
+		if (!validate_user_check_ptr(l_PrivateKeyTemplate[i].pValue, ulValueLen))
+		{
+			return CKR_DEVICE_MEMORY;
+		}
+
+        privateValue[i].resize(ulValueLen);
+        memcpy_s(privateValue[i].data(), ulValueLen, l_PrivateKeyTemplate[i].pValue, ulValueLen);
+        l_PrivateKeyTemplate[i].pValue = privateValue[i].data();
+    }
+
+    auto l_pPrivateKeyTemplate= l_PrivateKeyTemplate;
+
+	if (!validate_user_check_mechanism_ptr(pMechanism, 1))
+	{
+		return CKR_DEVICE_MEMORY;
+	}
+
+    CK_MECHANISM l_mechanism;
+    memcpy_s(&l_mechanism, sizeof(CK_MECHANISM), pMechanism, sizeof(CK_MECHANISM));
+
+    auto ulParameterLen = l_mechanism.ulParameterLen;
+
+    if (ulParameterLen > CKM_MAX_PARAMETER_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    CK_BYTE parameter[ulParameterLen];
+    if (l_mechanism.pParameter != nullptr)
+    {
+        if (!validate_user_check_ptr(l_mechanism.pParameter, ulParameterLen))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        memcpy_s(&parameter[0], ulParameterLen, l_mechanism.pParameter, ulParameterLen);
+        l_mechanism.pParameter = &parameter[0];
+    }
+    auto l_pMechanism = &l_mechanism;
 
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
@@ -6768,7 +7464,7 @@ CK_RV SoftHSM::C_GenerateKeyPair
 
 	// Check the mechanism, only accept RSA, DSA, EC and DH key pair generation.
 	CK_KEY_TYPE keyType;
-	switch (pMechanism->mechanism)
+	switch (l_pMechanism->mechanism)
 	{
 		case CKM_RSA_PKCS_KEY_PAIR_GEN:
 			keyType = CKK_RSA;
@@ -6808,22 +7504,22 @@ CK_RV SoftHSM::C_GenerateKeyPair
 	CK_BBOOL ispublicKeyToken = CK_FALSE;
 	CK_BBOOL ispublicKeyPrivate = CK_FALSE;
 	bool isPublicKeyImplicit = true;
-	extractObjectInformation(pPublicKeyTemplate, ulPublicKeyAttributeCount, publicKeyClass, keyType, dummy, ispublicKeyToken, ispublicKeyPrivate, isPublicKeyImplicit);
+	extractObjectInformation(l_pPublicKeyTemplate, ulPublicKeyAttributeCount, publicKeyClass, keyType, dummy, ispublicKeyToken, ispublicKeyPrivate, isPublicKeyImplicit);
 
 	// Report errors caused by accidental template mix-ups in the application using this cryptoki lib.
 	if (publicKeyClass != CKO_PUBLIC_KEY)
 		return CKR_ATTRIBUTE_VALUE_INVALID;
-	if (pMechanism->mechanism == CKM_RSA_PKCS_KEY_PAIR_GEN && keyType != CKK_RSA)
+	if (l_pMechanism->mechanism == CKM_RSA_PKCS_KEY_PAIR_GEN && keyType != CKK_RSA)
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_DSA_KEY_PAIR_GEN && keyType != CKK_DSA)
+	if (l_pMechanism->mechanism == CKM_DSA_KEY_PAIR_GEN && keyType != CKK_DSA)
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_EC_KEY_PAIR_GEN && keyType != CKK_EC)
+	if (l_pMechanism->mechanism == CKM_EC_KEY_PAIR_GEN && keyType != CKK_EC)
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_DH_PKCS_KEY_PAIR_GEN && keyType != CKK_DH)
+	if (l_pMechanism->mechanism == CKM_DH_PKCS_KEY_PAIR_GEN && keyType != CKK_DH)
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_GOSTR3410_KEY_PAIR_GEN && keyType != CKK_GOSTR3410)
+	if (l_pMechanism->mechanism == CKM_GOSTR3410_KEY_PAIR_GEN && keyType != CKK_GOSTR3410)
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_EC_EDWARDS_KEY_PAIR_GEN && keyType != CKK_EC_EDWARDS)
+	if (l_pMechanism->mechanism == CKM_EC_EDWARDS_KEY_PAIR_GEN && keyType != CKK_EC_EDWARDS)
 		return CKR_TEMPLATE_INCONSISTENT;
 
 	// Extract information from the private key template that is needed to create the object.
@@ -6831,22 +7527,22 @@ CK_RV SoftHSM::C_GenerateKeyPair
 	CK_BBOOL isprivateKeyToken = CK_FALSE;
 	CK_BBOOL isprivateKeyPrivate = CK_TRUE;
 	bool isPrivateKeyImplicit = true;
-	extractObjectInformation(pPrivateKeyTemplate, ulPrivateKeyAttributeCount, privateKeyClass, keyType, dummy, isprivateKeyToken, isprivateKeyPrivate, isPrivateKeyImplicit);
+	extractObjectInformation(l_pPrivateKeyTemplate, ulPrivateKeyAttributeCount, privateKeyClass, keyType, dummy, isprivateKeyToken, isprivateKeyPrivate, isPrivateKeyImplicit);
 
 	// Report errors caused by accidental template mix-ups in the application using this cryptoki lib.
 	if (privateKeyClass != CKO_PRIVATE_KEY)
 		return CKR_ATTRIBUTE_VALUE_INVALID;
-	if (pMechanism->mechanism == CKM_RSA_PKCS_KEY_PAIR_GEN && keyType != CKK_RSA)
+	if (l_pMechanism->mechanism == CKM_RSA_PKCS_KEY_PAIR_GEN && keyType != CKK_RSA)
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_DSA_KEY_PAIR_GEN && keyType != CKK_DSA)
+	if (l_pMechanism->mechanism == CKM_DSA_KEY_PAIR_GEN && keyType != CKK_DSA)
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_EC_KEY_PAIR_GEN && keyType != CKK_EC)
+	if (l_pMechanism->mechanism == CKM_EC_KEY_PAIR_GEN && keyType != CKK_EC)
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_DH_PKCS_KEY_PAIR_GEN && keyType != CKK_DH)
+	if (l_pMechanism->mechanism == CKM_DH_PKCS_KEY_PAIR_GEN && keyType != CKK_DH)
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_GOSTR3410_KEY_PAIR_GEN && keyType != CKK_GOSTR3410)
+	if (l_pMechanism->mechanism == CKM_GOSTR3410_KEY_PAIR_GEN && keyType != CKK_GOSTR3410)
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_EC_EDWARDS_KEY_PAIR_GEN && keyType != CKK_EC_EDWARDS)
+	if (l_pMechanism->mechanism == CKM_EC_EDWARDS_KEY_PAIR_GEN && keyType != CKK_EC_EDWARDS)
 		return CKR_TEMPLATE_INCONSISTENT;
 
 	// Check user credentials
@@ -6866,12 +7562,12 @@ CK_RV SoftHSM::C_GenerateKeyPair
 	}
 
 	// Generate RSA keys
-	if (pMechanism->mechanism == CKM_RSA_PKCS_KEY_PAIR_GEN)
+	if (l_pMechanism->mechanism == CKM_RSA_PKCS_KEY_PAIR_GEN)
 	{
 			rv = this->generateRSA(hSession,
-								   pPublicKeyTemplate, ulPublicKeyAttributeCount,
-								   pPrivateKeyTemplate, ulPrivateKeyAttributeCount,
-								   phPublicKey, phPrivateKey,
+								   l_pPublicKeyTemplate, ulPublicKeyAttributeCount,
+								   l_pPrivateKeyTemplate, ulPrivateKeyAttributeCount,
+								   l_phPublicKey, l_phPrivateKey,
 								   ispublicKeyToken, ispublicKeyPrivate, isprivateKeyToken, isprivateKeyPrivate);
 #ifdef SGXHSM
 			if (rv == CKR_OK)
@@ -6886,7 +7582,7 @@ CK_RV SoftHSM::C_GenerateKeyPair
 
                 OSAttribute pairKeyId(pairKeyIdVal);
 
-				osobject = (OSObject*)handleManager->getObject(*phPublicKey);
+				osobject = (OSObject*)handleManager->getObject(hPublicKey);
 				if (osobject == NULL_PTR || !osobject->isValid()) {
 					rv = CKR_FUNCTION_FAILED;
 				} else if (osobject->startTransaction()) {
@@ -6903,25 +7599,25 @@ CK_RV SoftHSM::C_GenerateKeyPair
 					if (!bOK)
 					{
 						rv = CKR_FUNCTION_FAILED;
-						if (*phPublicKey != CK_INVALID_HANDLE)
+						if (hPublicKey != CK_INVALID_HANDLE)
 						{
-							OSObject* obj = (OSObject*)handleManager->getObject(*phPublicKey);
-							handleManager->destroyObject(*phPublicKey);
+							OSObject* obj = (OSObject*)handleManager->getObject(hPublicKey);
+							handleManager->destroyObject(hPublicKey);
 							if (obj) obj->destroyObject();
-							*phPublicKey = CK_INVALID_HANDLE;
+							hPublicKey = CK_INVALID_HANDLE;
 						}
 
-						if (*phPrivateKey != CK_INVALID_HANDLE)
+						if (hPrivateKey != CK_INVALID_HANDLE)
 						{
-							OSObject* obj = (OSObject*)handleManager->getObject(*phPrivateKey);
-							handleManager->destroyObject(*phPrivateKey);
+							OSObject* obj = (OSObject*)handleManager->getObject(hPrivateKey);
+							handleManager->destroyObject(hPrivateKey);
 							if (obj) obj->destroyObject();
-							*phPrivateKey = CK_INVALID_HANDLE;
+							hPrivateKey = CK_INVALID_HANDLE;
 						}
 					}
 				}
 
-				osobject = (OSObject*)handleManager->getObject(*phPrivateKey);
+				osobject = (OSObject*)handleManager->getObject(hPrivateKey);
 				if (osobject == NULL_PTR || !osobject->isValid()) {
 					rv = CKR_FUNCTION_FAILED;
 				} else if (osobject->startTransaction()) {
@@ -6938,80 +7634,98 @@ CK_RV SoftHSM::C_GenerateKeyPair
 					if (!bOK)
 					{
 						rv = CKR_FUNCTION_FAILED;
-						if (*phPublicKey != CK_INVALID_HANDLE)
+						if (hPublicKey != CK_INVALID_HANDLE)
 						{
-							OSObject* obj = (OSObject*)handleManager->getObject(*phPublicKey);
-							handleManager->destroyObject(*phPublicKey);
+							OSObject* obj = (OSObject*)handleManager->getObject(hPublicKey);
+							handleManager->destroyObject(hPublicKey);
 							if (obj) obj->destroyObject();
-							*phPublicKey = CK_INVALID_HANDLE;
+							hPublicKey = CK_INVALID_HANDLE;
 						}
 
-						if (*phPrivateKey != CK_INVALID_HANDLE)
+						if (hPrivateKey != CK_INVALID_HANDLE)
 						{
-							OSObject* obj = (OSObject*)handleManager->getObject(*phPrivateKey);
-							handleManager->destroyObject(*phPrivateKey);
+							OSObject* obj = (OSObject*)handleManager->getObject(hPrivateKey);
+							handleManager->destroyObject(hPrivateKey);
 							if (obj) obj->destroyObject();
-							*phPrivateKey = CK_INVALID_HANDLE;
+							hPrivateKey = CK_INVALID_HANDLE;
 						}
 					}
 				}
 			}
 #endif
+            *phPublicKey = hPublicKey;
+            *phPrivateKey = hPrivateKey;
             return rv;
 	}
 
 #if 0 // Unsupported by Crypto API Toolkit
 	// Generate DSA keys
-	if (pMechanism->mechanism == CKM_DSA_KEY_PAIR_GEN)
+	if (l_pMechanism->mechanism == CKM_DSA_KEY_PAIR_GEN)
 	{
-			return this->generateDSA(hSession,
-									 pPublicKeyTemplate, ulPublicKeyAttributeCount,
-									 pPrivateKeyTemplate, ulPrivateKeyAttributeCount,
-									 phPublicKey, phPrivateKey,
-									 ispublicKeyToken, ispublicKeyPrivate, isprivateKeyToken, isprivateKeyPrivate);
+		rv = this->generateDSA(hSession,
+								 l_pPublicKeyTemplate, ulPublicKeyAttributeCount,
+								 l_pPrivateKeyTemplate, ulPrivateKeyAttributeCount,
+								 l_phPublicKey, l_phPrivateKey,
+								 ispublicKeyToken, ispublicKeyPrivate, isprivateKeyToken, isprivateKeyPrivate);
+        *phPublicKey = hPublicKey;
+        *phPrivateKey = hPrivateKey;
+        return rv;
+
 	}
 #endif // Unsupported by Crypto API Toolkit
 
 	// Generate EC keys
-	if (pMechanism->mechanism == CKM_EC_KEY_PAIR_GEN)
+	if (l_pMechanism->mechanism == CKM_EC_KEY_PAIR_GEN)
 	{
-			return this->generateEC(hSession,
-									 pPublicKeyTemplate, ulPublicKeyAttributeCount,
-									 pPrivateKeyTemplate, ulPrivateKeyAttributeCount,
-									 phPublicKey, phPrivateKey,
-									 ispublicKeyToken, ispublicKeyPrivate, isprivateKeyToken, isprivateKeyPrivate);
+        rv = this->generateEC(hSession,
+								l_pPublicKeyTemplate, ulPublicKeyAttributeCount,
+								l_pPrivateKeyTemplate, ulPrivateKeyAttributeCount,
+								l_phPublicKey, l_phPrivateKey,
+								ispublicKeyToken, ispublicKeyPrivate, isprivateKeyToken, isprivateKeyPrivate);
+        *phPublicKey = hPublicKey;
+        *phPrivateKey = hPrivateKey;
+        return rv;
 	}
 
 #if 0 // Unsupported by Crypto API Toolkit
 	// Generate DH keys
-	if (pMechanism->mechanism == CKM_DH_PKCS_KEY_PAIR_GEN)
+	if (l_pMechanism->mechanism == CKM_DH_PKCS_KEY_PAIR_GEN)
 	{
-			return this->generateDH(hSession,
-									 pPublicKeyTemplate, ulPublicKeyAttributeCount,
-									 pPrivateKeyTemplate, ulPrivateKeyAttributeCount,
-									 phPublicKey, phPrivateKey,
+        rv = this->generateDH(hSession,
+									 l_pPublicKeyTemplate, ulPublicKeyAttributeCount,
+									 l_pPrivateKeyTemplate, ulPrivateKeyAttributeCount,
+									 l_phPublicKey, l_phPrivateKey,
 									 ispublicKeyToken, ispublicKeyPrivate, isprivateKeyToken, isprivateKeyPrivate);
+        *phPublicKey = hPublicKey;
+        *phPrivateKey = hPrivateKey;
+        return rv;
 	}
 
 	// Generate GOST keys
-	if (pMechanism->mechanism == CKM_GOSTR3410_KEY_PAIR_GEN)
+	if (l_pMechanism->mechanism == CKM_GOSTR3410_KEY_PAIR_GEN)
 	{
-			return this->generateGOST(hSession,
-									 pPublicKeyTemplate, ulPublicKeyAttributeCount,
-									 pPrivateKeyTemplate, ulPrivateKeyAttributeCount,
-									 phPublicKey, phPrivateKey,
-									 ispublicKeyToken, ispublicKeyPrivate, isprivateKeyToken, isprivateKeyPrivate);
+        rv = this->generateGOST(hSession,
+								  l_pPublicKeyTemplate, ulPublicKeyAttributeCount,
+								  l_pPrivateKeyTemplate, ulPrivateKeyAttributeCount,
+							   	  l_phPublicKey, l_phPrivateKey,
+								  ispublicKeyToken, ispublicKeyPrivate, isprivateKeyToken, isprivateKeyPrivate);
+        *phPublicKey = hPublicKey;
+        *phPrivateKey = hPrivateKey;
+        return rv;
 	}
 #endif // Unsupported by Crypto API Toolkit
 
 	// Generate EDDSA keys
-	if (pMechanism->mechanism == CKM_EC_EDWARDS_KEY_PAIR_GEN)
+	if (l_pMechanism->mechanism == CKM_EC_EDWARDS_KEY_PAIR_GEN)
 	{
-			return this->generateED(hSession,
-									 pPublicKeyTemplate, ulPublicKeyAttributeCount,
-									 pPrivateKeyTemplate, ulPrivateKeyAttributeCount,
-									 phPublicKey, phPrivateKey,
-									 ispublicKeyToken, ispublicKeyPrivate, isprivateKeyToken, isprivateKeyPrivate);
+        rv = this->generateED(hSession,
+							    l_pPublicKeyTemplate, ulPublicKeyAttributeCount,
+							    l_pPrivateKeyTemplate, ulPrivateKeyAttributeCount,
+							    l_phPublicKey, l_phPrivateKey,
+							    ispublicKeyToken, ispublicKeyPrivate, isprivateKeyToken, isprivateKeyPrivate);
+        *phPublicKey = hPublicKey;
+        *phPrivateKey = hPrivateKey;
+        return rv;
 	}
 
 	return CKR_GENERAL_ERROR;
@@ -7196,23 +7910,49 @@ CK_RV SoftHSM::C_WrapKey
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	if (pulWrappedKeyLen == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
-	if (!validate_user_check_mechanism_ptr(pMechanism, 1))
-	{
-		return CKR_DEVICE_MEMORY;
-	}
-
     if (!validate_user_check_ptr(pulWrappedKeyLen, sizeof(CK_ULONG)))
     {
         return CKR_DEVICE_MEMORY;
     }
 
-	if (pWrappedKey && *pulWrappedKeyLen)
+    CK_ULONG ulWrappedKeyLen = *pulWrappedKeyLen;
+    auto l_pulWrappedKeyLen = &ulWrappedKeyLen;
+
+	if (pWrappedKey && ulWrappedKeyLen)
 	{
-		if (!validate_user_check_ptr(pWrappedKey, *pulWrappedKeyLen))
+		if (!validate_user_check_ptr(pWrappedKey, ulWrappedKeyLen))
 		{
 			return CKR_DEVICE_MEMORY;
 		}
 	}
+
+	if (!validate_user_check_mechanism_ptr(pMechanism, 1))
+	{
+		return CKR_DEVICE_MEMORY;
+	}
+
+    CK_MECHANISM l_mechanism;
+    memcpy_s(&l_mechanism, sizeof(CK_MECHANISM), pMechanism, sizeof(CK_MECHANISM));
+
+    auto ulParameterLen = l_mechanism.ulParameterLen;
+
+    if (ulParameterLen > CKM_MAX_PARAMETER_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    CK_BYTE parameter[ulParameterLen];
+    if (l_mechanism.pParameter != nullptr)
+    {
+        if (!validate_user_check_ptr(l_mechanism.pParameter, ulParameterLen))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        memcpy_s(&parameter[0], ulParameterLen, l_mechanism.pParameter, ulParameterLen);
+        l_mechanism.pParameter = &parameter[0];
+    }
+    auto l_pMechanism = &l_mechanism;
 
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
@@ -7224,7 +7964,7 @@ CK_RV SoftHSM::C_WrapKey
 
 	CK_RV rv;
 	// Check the mechanism, only accept advanced AES key wrapping and RSA
-	switch(pMechanism->mechanism)
+	switch(l_pMechanism->mechanism)
 	{
         case CKM_AES_CTR:
 #ifdef WITH_AES_GCM
@@ -7242,12 +7982,12 @@ CK_RV SoftHSM::C_WrapKey
 #endif
 		case CKM_RSA_PKCS:
 			// Does not handle optional init vector
-			if (pMechanism->pParameter != NULL_PTR ||
-                pMechanism->ulParameterLen != 0)
+			if (l_pMechanism->pParameter != NULL_PTR ||
+                l_pMechanism->ulParameterLen != 0)
 			return CKR_ARGUMENTS_BAD;
 			break;
 		case CKM_RSA_PKCS_OAEP:
-			rv = MechParamCheckRSAPKCSOAEP(pMechanism);
+			rv = MechParamCheckRSAPKCSOAEP(l_pMechanism);
 			if (rv != CKR_OK)
 				return rv;
 			break;
@@ -7260,10 +8000,10 @@ CK_RV SoftHSM::C_WrapKey
 	Token* token = session->getToken();
 	if (token == NULL) return CKR_GENERAL_ERROR;
 
-    if(pMechanism->mechanism == CKM_EXPORT_ECDSA_QUOTE_RSA_PUBLIC_KEY_INTERNAL)
+    if(l_pMechanism->mechanism == CKM_EXPORT_ECDSA_QUOTE_RSA_PUBLIC_KEY_INTERNAL)
     {
         // Wrapping key Id must be null for RSA quote + public key export
-        if (hWrappingKey || !pulWrappedKeyLen)
+        if (hWrappingKey || !l_pulWrappedKeyLen)
         {
             return CKR_ARGUMENTS_BAD;
         }
@@ -7290,9 +8030,11 @@ CK_RV SoftHSM::C_WrapKey
 
         rv = exportQuoteWithRsaPublicKey(hSession,
                                          hKey,
-                                         pMechanism,
+                                         l_pMechanism,
                                          pWrappedKey,
-                                         pulWrappedKeyLen);
+                                         l_pulWrappedKeyLen);
+
+        *pulWrappedKeyLen = ulWrappedKeyLen;
 
         if (pWrappedKey)
         {
@@ -7300,7 +8042,7 @@ CK_RV SoftHSM::C_WrapKey
             bOK = bOK && key->setAttribute(CKA_USED_FOR_QUOTE_GENERATION, true);
             if (!bOK)
             {
-                memset_s(pWrappedKey, *pulWrappedKeyLen, 0x00, *pulWrappedKeyLen);
+                memset_s(pWrappedKey, ulWrappedKeyLen, 0x00, ulWrappedKeyLen);
                 rv = CKR_FUNCTION_FAILED;
                 return rv;
             }
@@ -7308,7 +8050,7 @@ CK_RV SoftHSM::C_WrapKey
             bOK = bOK && key->setAttribute(CKA_USED_FOR_WRAPPING, true);
             if (!bOK)
             {
-                memset_s(pWrappedKey, *pulWrappedKeyLen, 0x00, *pulWrappedKeyLen);
+                memset_s(pWrappedKey, ulWrappedKeyLen, 0x00, ulWrappedKeyLen);
                 rv = CKR_FUNCTION_FAILED;
                 return rv;
             }
@@ -7316,7 +8058,7 @@ CK_RV SoftHSM::C_WrapKey
             CK_OBJECT_HANDLE privateKeyHandle = getRSAPairKey(hSession, hKey);
             if (CK_INVALID_HANDLE == privateKeyHandle)
             {
-                memset_s(pWrappedKey, *pulWrappedKeyLen, 0x00, *pulWrappedKeyLen);
+                memset_s(pWrappedKey, ulWrappedKeyLen, 0x00, ulWrappedKeyLen);
                 return CKR_KEY_HANDLE_INVALID;
             }
 
@@ -7324,21 +8066,21 @@ CK_RV SoftHSM::C_WrapKey
             OSObject *privateKey = (OSObject*)handleManager->getObject(privateKeyHandle);
             if (nullptr == privateKey || !privateKey->isValid())
             {
-                memset_s(pWrappedKey, *pulWrappedKeyLen, 0x00, *pulWrappedKeyLen);
+                memset_s(pWrappedKey, ulWrappedKeyLen, 0x00, ulWrappedKeyLen);
                 return CKR_OBJECT_HANDLE_INVALID;
             }
 
             bOK = bOK && privateKey->setAttribute(CKA_USED_FOR_QUOTE_GENERATION, true);
             if (!bOK)
             {
-                memset_s(pWrappedKey, *pulWrappedKeyLen, 0x00, *pulWrappedKeyLen);
+                memset_s(pWrappedKey, ulWrappedKeyLen, 0x00, ulWrappedKeyLen);
                 rv = CKR_FUNCTION_FAILED;
             }
 
             bOK = bOK && privateKey->setAttribute(CKA_USED_FOR_WRAPPING, true);
             if (!bOK)
             {
-                memset_s(pWrappedKey, *pulWrappedKeyLen, 0x00, *pulWrappedKeyLen);
+                memset_s(pWrappedKey, ulWrappedKeyLen, 0x00, ulWrappedKeyLen);
                 rv = CKR_FUNCTION_FAILED;
             }
         }
@@ -7377,23 +8119,23 @@ CK_RV SoftHSM::C_WrapKey
         }
 
         // Check wrapping key class and type
-        if ((pMechanism->mechanism == CKM_AES_KEY_WRAP || pMechanism->mechanism == CKM_AES_KEY_WRAP_PAD) && wrapKey->getUnsignedLongValue(CKA_CLASS, CKO_VENDOR_DEFINED) != CKO_SECRET_KEY)
+        if ((l_pMechanism->mechanism == CKM_AES_KEY_WRAP || l_pMechanism->mechanism == CKM_AES_KEY_WRAP_PAD) && wrapKey->getUnsignedLongValue(CKA_CLASS, CKO_VENDOR_DEFINED) != CKO_SECRET_KEY)
             return CKR_WRAPPING_KEY_TYPE_INCONSISTENT;
-        if ((pMechanism->mechanism == CKM_RSA_PKCS || pMechanism->mechanism == CKM_RSA_PKCS_OAEP) && wrapKey->getUnsignedLongValue(CKA_CLASS, CKO_VENDOR_DEFINED) != CKO_PUBLIC_KEY)
+        if ((l_pMechanism->mechanism == CKM_RSA_PKCS || l_pMechanism->mechanism == CKM_RSA_PKCS_OAEP) && wrapKey->getUnsignedLongValue(CKA_CLASS, CKO_VENDOR_DEFINED) != CKO_PUBLIC_KEY)
             return CKR_WRAPPING_KEY_TYPE_INCONSISTENT;
-        if (pMechanism->mechanism == CKM_AES_KEY_WRAP && wrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
+        if (l_pMechanism->mechanism == CKM_AES_KEY_WRAP && wrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
             return CKR_WRAPPING_KEY_TYPE_INCONSISTENT;
-        if (pMechanism->mechanism == CKM_AES_KEY_WRAP_PAD && wrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
+        if (l_pMechanism->mechanism == CKM_AES_KEY_WRAP_PAD && wrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
             return CKR_WRAPPING_KEY_TYPE_INCONSISTENT;
-        if ((pMechanism->mechanism == CKM_RSA_PKCS || pMechanism->mechanism == CKM_RSA_PKCS_OAEP) && wrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_RSA)
+        if ((l_pMechanism->mechanism == CKM_RSA_PKCS || l_pMechanism->mechanism == CKM_RSA_PKCS_OAEP) && wrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_RSA)
             return CKR_WRAPPING_KEY_TYPE_INCONSISTENT;
-        if (pMechanism->mechanism == CKM_AES_CTR && wrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
+        if (l_pMechanism->mechanism == CKM_AES_CTR && wrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
             return CKR_WRAPPING_KEY_TYPE_INCONSISTENT;
-        if (pMechanism->mechanism == CKM_AES_GCM && wrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
+        if (l_pMechanism->mechanism == CKM_AES_GCM && wrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
             return CKR_WRAPPING_KEY_TYPE_INCONSISTENT;
-        if (pMechanism->mechanism == CKM_AES_CBC && wrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
+        if (l_pMechanism->mechanism == CKM_AES_CBC && wrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
             return CKR_WRAPPING_KEY_TYPE_INCONSISTENT;
-        if (pMechanism->mechanism == CKM_AES_CBC_PAD && wrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
+        if (l_pMechanism->mechanism == CKM_AES_CBC_PAD && wrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
             return CKR_WRAPPING_KEY_TYPE_INCONSISTENT;
 
         // Check if the wrapping key can be used for wrapping
@@ -7401,7 +8143,7 @@ CK_RV SoftHSM::C_WrapKey
             return CKR_KEY_FUNCTION_NOT_PERMITTED;
 
         // Check if the specified mechanism is allowed for the wrapping key
-        if (!isMechanismPermitted(wrapKey, pMechanism))
+        if (!isMechanismPermitted(wrapKey, l_pMechanism))
             return CKR_MECHANISM_INVALID;
 
         // Check the to be wrapped key handle.
@@ -7434,7 +8176,7 @@ CK_RV SoftHSM::C_WrapKey
         if (keyClass != CKO_SECRET_KEY && keyClass != CKO_PRIVATE_KEY)
             return CKR_KEY_NOT_WRAPPABLE;
         // CKM_RSA_PKCS and CKM_RSA_PKCS_OAEP can be used only on SECRET keys: PKCS#11 2.40 draft 2 section 2.1.6 PKCS #1 v1.5 RSA & section 2.1.8 PKCS #1 RSA OAEP
-        if ((pMechanism->mechanism == CKM_RSA_PKCS || pMechanism->mechanism == CKM_RSA_PKCS_OAEP) && keyClass != CKO_SECRET_KEY)
+        if ((l_pMechanism->mechanism == CKM_RSA_PKCS || l_pMechanism->mechanism == CKM_RSA_PKCS_OAEP) && keyClass != CKO_SECRET_KEY)
             return CKR_KEY_NOT_WRAPPABLE;
 
         // Verify the wrap template attribute
@@ -7566,35 +8308,37 @@ CK_RV SoftHSM::C_WrapKey
         keyClass = wrapKey->getUnsignedLongValue(CKA_CLASS, CKO_VENDOR_DEFINED);
 #ifdef SGXHSM
         if (keyClass == CKO_SECRET_KEY                  &&
-            (pMechanism->mechanism  == CKM_AES_CTR      ||
-             pMechanism->mechanism  == CKM_AES_GCM      ||
-             pMechanism->mechanism  == CKM_AES_CBC      ||
-             pMechanism->mechanism  == CKM_AES_CBC_PAD))
+            (l_pMechanism->mechanism  == CKM_AES_CTR      ||
+             l_pMechanism->mechanism  == CKM_AES_GCM      ||
+             l_pMechanism->mechanism  == CKM_AES_CBC      ||
+             l_pMechanism->mechanism  == CKM_AES_CBC_PAD))
         {
             if (!pWrappedKey)
             {
-                rv = SoftHSM::SymEncryptInit(hSession, pMechanism, hWrappingKey);
+                rv = SoftHSM::SymEncryptInit(hSession, l_pMechanism, hWrappingKey);
                 if (rv != CKR_OK)
                 {
                     session->resetOp();
                     return rv;
                 }
 
-                rv = SymEncrypt(session, (CK_BYTE_PTR) keydata.const_byte_str(), keydata.size(), NULL_PTR, pulWrappedKeyLen);
+                rv = SymEncrypt(session, (CK_BYTE_PTR) keydata.const_byte_str(), keydata.size(), NULL_PTR, l_pulWrappedKeyLen);
 
                 session->resetOp();
+
+                *pulWrappedKeyLen = ulWrappedKeyLen;
 
                 return rv;
             }
 
-            rv = SoftHSM::SymEncryptInit(hSession, pMechanism, hWrappingKey);
+            rv = SoftHSM::SymEncryptInit(hSession, l_pMechanism, hWrappingKey);
             if (rv != CKR_OK)
             {
                 session->resetOp();
                 return rv;
             }
 
-            rv = SymEncrypt(session, (CK_BYTE_PTR) keydata.const_byte_str(), keydata.size(), pWrappedKey, pulWrappedKeyLen);
+            rv = SymEncrypt(session, (CK_BYTE_PTR) keydata.const_byte_str(), keydata.size(), pWrappedKey, l_pulWrappedKeyLen);
             if (rv != CKR_OK)
             {
                 session->resetOp();
@@ -7608,11 +8352,11 @@ CK_RV SoftHSM::C_WrapKey
             ByteString wrapped;
             if (keyClass == CKO_SECRET_KEY)
             {
-                rv = SoftHSM::WrapKeySym(pMechanism, token, wrapKey, keydata, wrapped);
+                rv = SoftHSM::WrapKeySym(l_pMechanism, token, wrapKey, keydata, wrapped);
             }
             else
             {
-                rv = SoftHSM::WrapKeyAsym(pMechanism, token, wrapKey, keydata, wrapped);
+                rv = SoftHSM::WrapKeyAsym(l_pMechanism, token, wrapKey, keydata, wrapped);
 #ifdef SGXHSM
                 if (rv == CKR_OK)
                 {
@@ -7727,9 +8471,9 @@ CK_RV SoftHSM::C_WrapKey
 
             if (pWrappedKey != NULL)
             {
-                if (*pulWrappedKeyLen >= wrapped.size())
+                if (ulWrappedKeyLen >= wrapped.size())
                 {
-                    memcpy_s(pWrappedKey, *pulWrappedKeyLen, wrapped.byte_str(), wrapped.size());
+                    memcpy_s(pWrappedKey, ulWrappedKeyLen, wrapped.byte_str(), wrapped.size());
                 }
                 else
                 {
@@ -7874,6 +8618,9 @@ CK_RV SoftHSM::C_UnwrapKey
 	CK_OBJECT_HANDLE_PTR hKey
 )
 {
+    CK_OBJECT_HANDLE lhKey;
+    auto l_hKey = &lhKey;
+
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
@@ -7881,14 +8628,14 @@ CK_RV SoftHSM::C_UnwrapKey
 	if (pTemplate == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	if (hKey == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
-	if (!validate_user_check_mechanism_ptr(pMechanism, 1))
-	{
-		return CKR_DEVICE_MEMORY;
-	}
-
     if (!validate_user_check_ptr(pWrappedKey, ulWrappedKeyLen))
     {
         return CKR_DEVICE_MEMORY;
+    }
+
+    if (ulCount > CKA_MAX_ATTRIBUTES)
+    {
+        return CKR_ARGUMENTS_BAD;
     }
 
 	if (!validate_user_check_attribute_ptr(pTemplate, ulCount))
@@ -7901,6 +8648,59 @@ CK_RV SoftHSM::C_UnwrapKey
         return CKR_DEVICE_MEMORY;
     }
 
+    CK_ATTRIBUTE l_template[ulCount];
+    memcpy_s(l_template, ulCount * sizeof(CK_ATTRIBUTE), pTemplate, ulCount * sizeof(CK_ATTRIBUTE));
+
+    std::vector<std::vector<CK_BYTE>> value(ulCount);
+
+    for (CK_ULONG i = 0; i < ulCount; i++)
+    {
+        if (l_template[i].pValue == nullptr)
+        {
+            continue;
+        }
+
+        auto ulValueLen = l_template[i].ulValueLen;
+        if (!validate_user_check_ptr(l_template[i].pValue, ulValueLen))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        value[i].resize(ulValueLen);
+        memcpy_s(value[i].data(), ulValueLen, l_template[i].pValue, ulValueLen);
+        l_template[i].pValue = value[i].data();
+    }
+
+    auto l_pTemplate = l_template;
+
+	if (!validate_user_check_mechanism_ptr(pMechanism, 1))
+	{
+		return CKR_DEVICE_MEMORY;
+	}
+
+    CK_MECHANISM l_mechanism;
+    memcpy_s(&l_mechanism, sizeof(CK_MECHANISM), pMechanism, sizeof(CK_MECHANISM));
+
+    auto ulParameterLen = l_mechanism.ulParameterLen;
+
+    if (ulParameterLen > CKM_MAX_PARAMETER_LEN)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    CK_BYTE parameter[ulParameterLen];
+    if (l_mechanism.pParameter != nullptr)
+    {
+        if (!validate_user_check_ptr(l_mechanism.pParameter, ulParameterLen))
+        {
+            return CKR_DEVICE_MEMORY;
+        }
+
+        memcpy_s(&parameter[0], ulParameterLen, l_mechanism.pParameter, ulParameterLen);
+        l_mechanism.pParameter = &parameter[0];
+    }
+    auto l_pMechanism = &l_mechanism;
+
 #ifdef ENABLE_MITIGATION
     __builtin_ia32_lfence();
 #endif
@@ -7911,7 +8711,7 @@ CK_RV SoftHSM::C_UnwrapKey
 
 	CK_RV rv;
 	// Check the mechanism
-	switch(pMechanism->mechanism)
+	switch(l_pMechanism->mechanism)
 	{
         case CKM_AES_CTR:
 #ifdef WITH_AES_GCM		
@@ -7925,8 +8725,8 @@ CK_RV SoftHSM::C_UnwrapKey
 			if ((ulWrappedKeyLen < 24) || ((ulWrappedKeyLen % 8) != 0))
 				return CKR_WRAPPED_KEY_LEN_RANGE;
 			// Does not handle optional init vector
-			if (pMechanism->pParameter != NULL_PTR ||
-                            pMechanism->ulParameterLen != 0)
+			if (l_pMechanism->pParameter != NULL_PTR ||
+                l_pMechanism->ulParameterLen != 0)
 				return CKR_ARGUMENTS_BAD;
 			break;
 #endif
@@ -7935,8 +8735,8 @@ CK_RV SoftHSM::C_UnwrapKey
 			if ((ulWrappedKeyLen < 16) || ((ulWrappedKeyLen % 8) != 0))
 				return CKR_WRAPPED_KEY_LEN_RANGE;
 			// Does not handle optional init vector
-			if (pMechanism->pParameter != NULL_PTR ||
-                            pMechanism->ulParameterLen != 0)
+			if (l_pMechanism->pParameter != NULL_PTR ||
+                l_pMechanism->ulParameterLen != 0)
 				return CKR_ARGUMENTS_BAD;
 			break;
 #endif
@@ -7944,7 +8744,7 @@ CK_RV SoftHSM::C_UnwrapKey
 			// Input length checks needs to be done later when unwrapping key is known
 			break;
 		case CKM_RSA_PKCS_OAEP:
-			rv = MechParamCheckRSAPKCSOAEP(pMechanism);
+			rv = MechParamCheckRSAPKCSOAEP(l_pMechanism);
 			if (rv != CKR_OK)
 				return rv;
 			break;
@@ -7977,23 +8777,23 @@ CK_RV SoftHSM::C_UnwrapKey
 	}
 
 	// Check unwrapping key class and type
-	if ((pMechanism->mechanism == CKM_AES_KEY_WRAP || pMechanism->mechanism == CKM_AES_KEY_WRAP_PAD) && unwrapKey->getUnsignedLongValue(CKA_CLASS, CKO_VENDOR_DEFINED) != CKO_SECRET_KEY)
+	if ((l_pMechanism->mechanism == CKM_AES_KEY_WRAP || l_pMechanism->mechanism == CKM_AES_KEY_WRAP_PAD) && unwrapKey->getUnsignedLongValue(CKA_CLASS, CKO_VENDOR_DEFINED) != CKO_SECRET_KEY)
 		return CKR_UNWRAPPING_KEY_TYPE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_AES_KEY_WRAP && unwrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
+	if (l_pMechanism->mechanism == CKM_AES_KEY_WRAP && unwrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
 		return CKR_UNWRAPPING_KEY_TYPE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_AES_KEY_WRAP_PAD && unwrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
+	if (l_pMechanism->mechanism == CKM_AES_KEY_WRAP_PAD && unwrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
 		return CKR_UNWRAPPING_KEY_TYPE_INCONSISTENT;
-	if ((pMechanism->mechanism == CKM_RSA_PKCS || pMechanism->mechanism == CKM_RSA_PKCS_OAEP) && unwrapKey->getUnsignedLongValue(CKA_CLASS, CKO_VENDOR_DEFINED) != CKO_PRIVATE_KEY)
+	if ((l_pMechanism->mechanism == CKM_RSA_PKCS || l_pMechanism->mechanism == CKM_RSA_PKCS_OAEP) && unwrapKey->getUnsignedLongValue(CKA_CLASS, CKO_VENDOR_DEFINED) != CKO_PRIVATE_KEY)
 		return CKR_UNWRAPPING_KEY_TYPE_INCONSISTENT;
-	if ((pMechanism->mechanism == CKM_RSA_PKCS || pMechanism->mechanism == CKM_RSA_PKCS_OAEP) && unwrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_RSA)
+	if ((l_pMechanism->mechanism == CKM_RSA_PKCS || l_pMechanism->mechanism == CKM_RSA_PKCS_OAEP) && unwrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_RSA)
 		return CKR_UNWRAPPING_KEY_TYPE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_AES_CTR && unwrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
+	if (l_pMechanism->mechanism == CKM_AES_CTR && unwrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
 		return CKR_WRAPPING_KEY_TYPE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_AES_GCM && unwrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
+	if (l_pMechanism->mechanism == CKM_AES_GCM && unwrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
 		return CKR_WRAPPING_KEY_TYPE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_AES_CBC && unwrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
+	if (l_pMechanism->mechanism == CKM_AES_CBC && unwrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
 		return CKR_WRAPPING_KEY_TYPE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_AES_CBC_PAD && unwrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
+	if (l_pMechanism->mechanism == CKM_AES_CBC_PAD && unwrapKey->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
 		return CKR_WRAPPING_KEY_TYPE_INCONSISTENT;
 
 	// Check if the unwrapping key can be used for unwrapping
@@ -8001,7 +8801,7 @@ CK_RV SoftHSM::C_UnwrapKey
 		return CKR_KEY_FUNCTION_NOT_PERMITTED;
 
 	// Check if the specified mechanism is allowed for the unwrap key
-	if (!isMechanismPermitted(unwrapKey, pMechanism))
+	if (!isMechanismPermitted(unwrapKey, l_pMechanism))
 		return CKR_MECHANISM_INVALID;
 
 	// Extract information from the template that is needed to create the object.
@@ -8011,7 +8811,7 @@ CK_RV SoftHSM::C_UnwrapKey
 	CK_BBOOL isPrivate = CK_TRUE;
 	CK_CERTIFICATE_TYPE dummy;
 	bool isImplicit = false;
-	rv = extractObjectInformation(pTemplate, ulCount, objClass, keyType, dummy, isOnToken, isPrivate, isImplicit);
+	rv = extractObjectInformation(l_pTemplate, ulCount, objClass, keyType, dummy, isOnToken, isPrivate, isImplicit);
 	if (rv != CKR_OK)
 	{
 		// ERROR_MSG("Mandatory attribute not present in template");
@@ -8054,7 +8854,7 @@ CK_RV SoftHSM::C_UnwrapKey
 		return CKR_TEMPLATE_INCONSISTENT;
 	for (CK_ULONG i = 0; i < ulCount; ++i)
 	{
-		switch (pTemplate[i].type)
+		switch (l_pTemplate[i].type)
 		{
 			case CKA_CLASS:
 			case CKA_TOKEN:
@@ -8062,7 +8862,7 @@ CK_RV SoftHSM::C_UnwrapKey
 			case CKA_KEY_TYPE:
 				continue;
 			default:
-				secretAttribs[secretAttribsCount++] = pTemplate[i];
+				secretAttribs[secretAttribsCount++] = l_pTemplate[i];
 		}
 	}
 
@@ -8109,19 +8909,18 @@ CK_RV SoftHSM::C_UnwrapKey
 		}
 	}
 
-	*hKey = CK_INVALID_HANDLE;
+	lhKey = CK_INVALID_HANDLE;
 
 	// Unwrap the key
-	ByteString wrapped(pWrappedKey, ulWrappedKeyLen);
 	ByteString keydata;
     if (unwrapKey->getUnsignedLongValue(CKA_CLASS, CKO_VENDOR_DEFINED) == CKO_SECRET_KEY &&
-        (pMechanism->mechanism  == CKM_AES_CTR    ||
-         pMechanism->mechanism  == CKM_AES_GCM    ||
-         pMechanism->mechanism  == CKM_AES_CBC    ||
-         pMechanism->mechanism  == CKM_AES_CBC_PAD))
+        (l_pMechanism->mechanism  == CKM_AES_CTR    ||
+         l_pMechanism->mechanism  == CKM_AES_GCM    ||
+         l_pMechanism->mechanism  == CKM_AES_CBC    ||
+         l_pMechanism->mechanism  == CKM_AES_CBC_PAD))
     
     {
-        rv = SoftHSM::SymDecryptInit(hSession, pMechanism, hUnwrappingKey);
+        rv = SoftHSM::SymDecryptInit(hSession, l_pMechanism, hUnwrappingKey);
         if (rv != CKR_OK)
         {
             return rv;
@@ -8145,13 +8944,14 @@ CK_RV SoftHSM::C_UnwrapKey
     }
     else
     {
+        ByteString wrapped(pWrappedKey, ulWrappedKeyLen);
         if (unwrapKey->getUnsignedLongValue(CKA_CLASS, CKO_VENDOR_DEFINED) == CKO_SECRET_KEY)
         {	 
-            rv = UnwrapKeySym(pMechanism, wrapped, token, unwrapKey, keydata);
+            rv = UnwrapKeySym(l_pMechanism, wrapped, token, unwrapKey, keydata);
         }
         else if (unwrapKey->getUnsignedLongValue(CKA_CLASS, CKO_VENDOR_DEFINED) == CKO_PRIVATE_KEY)
         {
-            rv = UnwrapKeyAsym(pMechanism, wrapped, token, unwrapKey, keydata);
+            rv = UnwrapKeyAsym(l_pMechanism, wrapped, token, unwrapKey, keydata);
 #if defined (DCAP_SUPPORT) && defined (EPHEMERAL_QUOTE)
             // If the key is used for quote generation should be used for only one unwrap operation
             // Destroying the key from session
@@ -8194,12 +8994,12 @@ CK_RV SoftHSM::C_UnwrapKey
     }
 
 	// Create the secret object using C_CreateObject
-	rv = this->CreateObject(hSession, secretAttribs, secretAttribsCount, hKey, OBJECT_OP_UNWRAP);
+	rv = this->CreateObject(hSession, secretAttribs, secretAttribsCount, l_hKey, OBJECT_OP_UNWRAP);
 
 	// Store the attributes that are being supplied
 	if (rv == CKR_OK)
 	{
-		OSObject* osobject = (OSObject*)handleManager->getObject(*hKey);
+		OSObject* osobject = (OSObject*)handleManager->getObject(lhKey);
 		if (osobject == NULL_PTR || !osobject->isValid())
         {
             return CKR_FUNCTION_FAILED;
@@ -8279,15 +9079,16 @@ CK_RV SoftHSM::C_UnwrapKey
 	// Remove secret that may have been created already when the function fails.
 	if (rv != CKR_OK)
 	{
-		if (*hKey != CK_INVALID_HANDLE)
+		if (lhKey != CK_INVALID_HANDLE)
 		{
-			OSObject* obj = (OSObject*)handleManager->getObject(*hKey);
-			handleManager->destroyObject(*hKey);
+			OSObject* obj = (OSObject*)handleManager->getObject(lhKey);
+			handleManager->destroyObject(lhKey);
 			if (obj) obj->destroyObject();
-			*hKey = CK_INVALID_HANDLE;
+			lhKey = CK_INVALID_HANDLE;
 		}
-
 	}
+
+    *hKey = lhKey;
 
 	return rv;
 }
@@ -8511,6 +9312,11 @@ CK_RV SoftHSM::C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomD
 
     if (ulRandomLen)
 	{
+        if (ulRandomLen > CKM_MAX_CRYPTO_OP_INPUT_LEN)
+        {
+            return CKR_ARGUMENTS_BAD;
+        }
+
         if (!validate_user_check_ptr(pRandomData, ulRandomLen))
         {
             return CKR_DEVICE_MEMORY;

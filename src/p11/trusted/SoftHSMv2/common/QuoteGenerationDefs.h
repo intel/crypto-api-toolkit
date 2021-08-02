@@ -42,6 +42,6 @@ QuoteGenerationDefs.h
 #define CKM_EXPORT_ECDSA_QUOTE_RSA_PUBLIC_KEY_INTERNAL (CKM_EXPORT_ECDSA_QUOTE_RSA_PUBLIC_KEY + 1)
 
 // Length of NONCE to be used in Quote Generation (in bytes)
-#define NONCE_LENGTH 16
+#define NONCE_LENGTH 32
 
 #endif // !_QUOTEGENERATIONDEFS_H

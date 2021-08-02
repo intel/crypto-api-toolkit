@@ -92,6 +92,24 @@
 #include "QuoteGenerationDefs.h"
 #include <memory>
 
+/* limiting the maximum for attribute template count */
+#define CKA_MAX_ATTRIBUTES              0x200
+
+/* limiting the maximum length for parameter length in mechanism */
+#define CKM_MAX_PARAMETER_LEN           0x1000
+
+/* limiting the maximum length for the buffers passed on for crypto operations to 50MB */
+#define CKM_MAX_CRYPTO_OP_INPUT_LEN     0x3200000
+
+/* limiting the maximum number of slots */
+#define MAX_SLOTS 0x1000
+
+/* limiting the maximum number of mechanisms */
+#define MAX_MECHANISM_COUNT 0x200
+
+/* limiting the maximum number of object count */
+#define MAX_OBJECT_COUNT 0x80000000UL
+
 class SoftHSM
 {
 public:

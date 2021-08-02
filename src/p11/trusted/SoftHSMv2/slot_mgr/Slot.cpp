@@ -112,16 +112,15 @@ CK_RV Slot::getSlotInfo(CK_SLOT_INFO_PTR info)
 		return CKR_ARGUMENTS_BAD;
 	}
 
-    char slotDescription [64];
-    char slotId[10];
+    char slotId[12];
+    std::string sDescription;
 #ifndef SGXHSM
-    snprintf(slotDescription, sizeof("SoftHSM slot ID 0x"), "SoftHSM slot ID 0x");
+    sDescription = "SoftHSM slot ID 0x";
 #else
-    snprintf(slotDescription, sizeof("SGXHSM slot ID 0x"), "SGXHSM slot ID 0x");
+   sDescription = "SGXHSM slot ID 0x";
 #endif
-    snprintf(slotId, sizeof(slotId), "0x%lx", slotID);
-    strncat_s(slotDescription, sizeof(slotDescription), slotId, 9);
-	const std::string sDescription(slotDescription, sizeof(slotDescription) - 1);
+    snprintf(slotId, sizeof(slotId), "%lx", slotID);
+    sDescription.append(slotId);
 
 	char mfgID[33];
 #ifndef SGXHSM

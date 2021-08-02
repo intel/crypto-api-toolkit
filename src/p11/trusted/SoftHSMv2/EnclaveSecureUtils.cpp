@@ -53,18 +53,6 @@ bool validate_user_check_mechanism_ptr(const CK_MECHANISM_PTR pMechanism, const 
         return false;
     }
 
-    // extra check to make sure the members are also within the boundary
-    for (CK_ULONG i = 0; i < ulCount; ++i)
-	{
-		if (pMechanism[i].pParameter)
-        {
-            if (!validate_user_check_ptr(pMechanism[i].pParameter, pMechanism[i].ulParameterLen))
-            {
-                return false;
-            }
-        }
-    }
-
     return true;
 }
 
@@ -74,18 +62,6 @@ bool validate_user_check_attribute_ptr(const CK_ATTRIBUTE_PTR pTemplate, const C
     if (!pTemplate || !sgx_is_outside_enclave(pTemplate, sizeof(CK_ATTRIBUTE) * ulCount))
     {
         return false;
-    }
-
-    // extra check to make sure the members are also within the boundary
-    for (CK_ULONG i = 0; i < ulCount; ++i)
-	{
-		if (pTemplate[i].pValue)
-        {
-            if (!validate_user_check_ptr(pTemplate[i].pValue, pTemplate[i].ulValueLen))
-            {
-                return false;
-            }
-        }
     }
 
     return true;

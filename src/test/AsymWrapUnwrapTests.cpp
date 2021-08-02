@@ -703,9 +703,18 @@ void AsymWrapUnwrapTests::testQuoteGeneration()
     result = customQuoteEcdsaSingleUse(mechanismType, hSession, hAsymKey, hAsymPrivateKey);
     CPPUNIT_ASSERT(true == result);
     rv = C_DestroyObject(hSession, hAsymKey);
+#ifdef EPHEMERAL_QUOTE
+    CPPUNIT_ASSERT(CKR_OBJECT_HANDLE_INVALID == rv);
+#else
     CPPUNIT_ASSERT(CKR_OK == rv);
+#endif
+
     rv = C_DestroyObject(hSession, hAsymPrivateKey);
+#ifdef EPHEMERAL_QUOTE
+    CPPUNIT_ASSERT(CKR_OBJECT_HANDLE_INVALID == rv);
+#else
     CPPUNIT_ASSERT(CKR_OK == rv);
+#endif
 
     // The key used for quote generation has to be a session key
     asymKeyAttribs[0].pValue = &bTrue;

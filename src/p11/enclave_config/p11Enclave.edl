@@ -35,6 +35,7 @@ enclave
     from "sgx_tsgxssl.edl" import *; /* Libraries for OpenSSL use in the enclave */
     from "sgx_tstdc.edl" import *; /* Libraries for OpenSSL use in the enclave */
     from "sgx_tprotected_fs.edl" import *;
+    from "sgx_pthread.edl" import *;
 
     include "cryptoki.h"
 
