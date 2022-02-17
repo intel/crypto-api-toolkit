@@ -59,6 +59,11 @@ AC_ARG_WITH([p11-kit-path],
             [P11KITINCLUDEPATH="${withval}"],
             [echo "--with-p11-kit-path option not set. Not including PKCS11 headers from p11-kit."; P11KITINCLUDEPATH="no"])
 
+AC_ARG_WITH([enclave-signing-key],
+            AC_HELP_STRING([--with-enclave-signing-key], [Will default to no signing key.]),
+            [SIGNINGKEYPATH="${withval}"],
+            [echo "--with-enclave-signing-key option not set. Not signing the enclave."; SIGNINGKEYPATH=""])
+
 AM_CONDITIONAL(WITH_DCAP, false)
 
 AC_ARG_ENABLE([dcap],
@@ -111,9 +116,15 @@ AC_ARG_ENABLE([multiprocess-support],
               [AC_DEFINE([MULTIPROCESS_SUPPORT_DISABLED], [], [MULTIPROCESS SUPPORT DISABLED])],
               [echo "--disable-multiprocess-support option not set. If the token is not expected to be simultaneously accessed for modification by multiple processes (write/update/delete), this flag can give a performance boost."])
 
+AM_CONDITIONAL(NO_SIGNING, false)
+AS_IF([test "x$SIGNINGKEYPATH" = "x"],
+      AM_CONDITIONAL(NO_SIGNING, true),
+      AC_CHECK_FILE("$SIGNINGKEYPATH", AC_SUBST(SIGNINGKEYPATH, $(realpath $SIGNINGKEYPATH)),[AC_MSG_ERROR([Enclave signing key configured but not found])]))
+
 AC_SUBST(SGXSDKDIR, $SGXSDK)
 AC_SUBST(SGXSSLDIR, $SGXSSL)
 AC_SUBST(CATKTOKENPATH, $TOKENPATH)
+AC_SUBST(SIGNINGKEYPATH, $SIGNINGKEYPATH)
 
 AC_PATH_PROG([SGX_EDGER8R], sgx_edger8r, [:], [${SGXSDKDIR}/bin/x64])
 

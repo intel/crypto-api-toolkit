@@ -52,6 +52,17 @@ else
 SGXSSLLIBDIR = $(SGXSSLDIR)/lib64
 endif
 
+if NO_SIGNING
+all-local: libp11SgxEnclave.la
+
+install-exec-local:
+else
+all-local: libp11SgxEnclave.la libp11SgxEnclave.signed.so
+
+install-exec-local:
+	cp .libs/libp11SgxEnclave.signed.so $(prefix)/lib
+endif
+
 EXTRA_DIST = $(srcdir)/../enclave_config/*        \
              $(srcdir)/*.h                        \
              $(srcdir)/SoftHSMv2/*.h              \
@@ -82,7 +93,11 @@ p11Enclave_t.h: p11Enclave_t.c
 p11Enclave_t.c: $(SGX_EDGER8R) ../enclave_config/p11Enclave.edl
 	$(SGX_EDGER8R) --trusted p11Enclave.edl --search-path $(srcdir)/../../../ --search-path $(srcdir)/../enclave_config --search-path $(SGXSDKDIR)/include --search-path $(SGXSSLDIR)/include
 
-all-local: libp11SgxEnclave.la
+libp11SgxEnclave.signed.so: libp11SgxEnclave.so
+	@$(SGX_SIGN) sign -key $(SIGNINGKEYPATH) -enclave ./.libs/libp11SgxEnclave.so.0.0.0 -out ./.libs/libp11SgxEnclave.signed.so -config $(srcdir)/../enclave_config/p11Enclave.config.xml
+	@echo "--------------------libp11SgxEnclave.signed.so built-----------------------------"
+
+libp11SgxEnclave.so: libp11SgxEnclave.la
 	@echo "--------------------libp11SgxEnclave.la built-----------------------------"
 #   this is a workaround to relink the enclave because the linker flags for the enclave are not handled properly by libtool
 #	ls -laR ./.libs/
@@ -165,11 +180,7 @@ all-local: libp11SgxEnclave.la
 		   ./SoftHSMv2/session_mgr/SessionManager.o                     \
 		   ./SoftHSMv2/P11Attributes.o                                  \
 		   -m64 -Wall -O2 -D_FORTIFY_SOURCE=2 -Wl,--no-undefined -nostdlib -nodefaultlibs -nostartfiles -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now -pie -L$(SGXSSLLIBDIR) -Wl,--whole-archive -lsgx_tsgxssl -Wl,--no-whole-archive -lsgx_tsgxssl_crypto -L$(SGXSDKDIR)/lib64 -Wl,--whole-archive -lsgx_trts -Wl,--no-whole-archive -Wl,--start-group -lsgx_tstdc -lsgx_tcxx -lsgx_tcrypto -lsgx_tservice -lsgx_tprotected_fs -lsgx_pthread -Wl,--end-group -Wl,-Bstatic -Wl,-Bsymbolic -Wl,--no-undefined -Wl,-pie,-eenclave_entry -Wl,--export-dynamic -Wl,--defsym,__ImageBase=0 -Wpragmas -Wl,-soname -Wl,libp11SgxEnclave.so.0 -o .libs/libp11SgxEnclave.so.0.0.0
-		@$(SGX_SIGN) sign -key $(srcdir)/../enclave_config/p11Enclave_private.pem -enclave ./.libs/libp11SgxEnclave.so.0.0.0 -out ./.libs/libp11SgxEnclave.signed.so -config $(srcdir)/../enclave_config/p11Enclave.config.xml
-		@echo "--------------------libp11SgxEnclave.signed.so built-----------------------------"
-
-install-exec-local:
-	cp .libs/libp11SgxEnclave.signed.so $(prefix)/lib
+	@echo "--------------------libp11SgxEnclave.so built-----------------------------"
 
 uninstall-local:
 	rm -f $(prefix)/lib/libp11SgxEnclave.signed.so* \
