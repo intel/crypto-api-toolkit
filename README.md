@@ -78,7 +78,9 @@ After downloading the souce, run ``sh autogen.sh``
 ### Configuration options
 The source can be configured by running ``./configure``
 
-``$ ./configure``
+``$ ./configure --with-enclave-signing-key=src/p11/enclave_config/p11Enclave_private.pem``
+
+> **NOTE** Please note that the enclave in the above example is signed with a test signing key. A production enclave should go through the process of signing an enclave as explained in the section Enclave Signing Tool in the [Intel(R) SGX Developer Reference for Linux* OS](https://download.01.org/intel-sgx/latest/linux-latest/docs/).
 
 The options that ``configure`` supports can be obtained by running ``./configure --help``. Below are the options that are specific to CTK:
 
@@ -92,11 +94,10 @@ The options that ``configure`` supports can be obtained by running ``./configure
 |--with-p11-kit-path | p11-kit include directory path | Build without p11-kit, using PKCS11 headers from CTK |
 |--enable-mitigation | Enable mitigations for CVE-2020-0551 (LVI) and other vulnerabilities | Mitigations disabled for CVE-2020-0551 (LVI) and other vulnerabilities |
 |--disable-multiprocess-support | If the token is not expected to be simultaneously accessed for modification by multiple processes (write/update/delete), this flag can give a performance boost. | The token and the objects are allowed to be modified (write/update/delete) by multiple processes simultaneously.
+|--with-enclave-signing-key | Sign enclave with given signing key | Do not sign the enclave |
 
 ### Compiling
 ``$ make``
-
-> **NOTE** Please note that the enclave is signed with a test signing key. A production enclave should go through the process of signing an enclave as explained in the section Enclave Signing Tool in the [Intel(R) SGX Developer Reference for Linux* OS](https://download.01.org/intel-sgx/latest/linux-latest/docs/).
 
 ### Installation
 ``$ sudo make install``
