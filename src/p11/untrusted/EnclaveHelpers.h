@@ -66,6 +66,7 @@
 #include <sgx_urts.h>
 #include <sgx_error.h>
 #include <map>
+#include <string>
 #include <unistd.h>
 
 #include "p11Enclave_u.h"
