@@ -1038,25 +1038,20 @@ void ObjectTests::testCopyObject()
 	rv = createDataObjectNormal(hSession, IN_SESSION, IS_PUBLIC, hObject);
 	CPPUNIT_ASSERT(rv == CKR_OK);
 
-	// Allowed to go on token
+	// Not allowed to go on token
 	bToken = CK_TRUE;
 	rv = CRYPTOKI_F_PTR( C_CopyObject(hSession, hObject, &attribs[0], 3, &hObject1) );
-	CPPUNIT_ASSERT(rv == CKR_OK);
+	CPPUNIT_ASSERT(rv == CKR_ACTION_PROHIBITED);
 	rv = CRYPTOKI_F_PTR( C_DestroyObject(hSession, hObject1) );
-	CPPUNIT_ASSERT(rv == CKR_OK);
-
-	// Allowed to go to private
-	bPrivate = CK_TRUE;
-	rv = CRYPTOKI_F_PTR( C_CopyObject(hSession, hObject, &attribs[0], 3, &hObject1) );
-	CPPUNIT_ASSERT(rv == CKR_OK);
-	rv = CRYPTOKI_F_PTR( C_DestroyObject(hSession, hObject1) );
-	CPPUNIT_ASSERT(rv == CKR_OK);
+	CPPUNIT_ASSERT(rv == CKR_OBJECT_HANDLE_INVALID);
 
 	// Not allowed to change a !ck8 parameter
 	CK_BYTE id[] = "Another object ID";
 	attribs[3].type = CKA_OBJECT_ID;
 	attribs[3].pValue = id;
 	attribs[3].ulValueLen = sizeof(id);
+
+    bToken = CK_FALSE;
 	rv = CRYPTOKI_F_PTR( C_CopyObject(hSession, hObject, &attribs[0], 4, &hObject1) );
 	CPPUNIT_ASSERT(rv == CKR_ATTRIBUTE_READ_ONLY);
 

@@ -81,7 +81,7 @@ install-exec-local:
 	chmod -R 1777 $(CATKTOKENPATH)/tokens
 	mkdir -p $(prefix)/include
 	chmod -R 1777 $(prefix)/include
-	cp $(srcdir)/src/p11/trusted/SoftHSMv2/common/QuoteGeneration.h $(srcdir)/src/p11/trusted/SoftHSMv2/common/cryptoki.h $(srcdir)/src/p11/trusted/SoftHSMv2/common/QuoteGenerationDefs.h $(prefix)/include
+	cp $(srcdir)/src/p11/trusted/SoftHSMv2/common/QuoteGeneration.h $(srcdir)/src/p11/trusted/SoftHSMv2/common/cryptoki.h $(srcdir)/src/p11/trusted/SoftHSMv2/common/QuoteGenerationDefs.h $(srcdir)/src/p11/trusted/SoftHSMv2/common/libp11sgx.h $(prefix)/include
 
 if !WITH_P11_KIT
 	cp $(srcdir)/src/p11/trusted/SoftHSMv2/pkcs11/* $(prefix)/include

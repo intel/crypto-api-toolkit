@@ -69,6 +69,7 @@
 #include "OSSLRSAKeyPair.h"
 #include <algorithm>
 #include <openssl/rsa.h>
+#include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/err.h>
 
@@ -1315,13 +1316,19 @@ bool OSSLRSA::encrypt(PublicKey* publicKey, const ByteString& data,
 
 // Decryption functions
 bool OSSLRSA::decrypt(PrivateKey* privateKey, const ByteString& encryptedData,
-		      ByteString& data, const AsymMech::Type padding)
+		      ByteString& data, const AsymMech::Type mechType, const CK_MECHANISM_TYPE hashAlgo)
 {
+    EVP_PKEY* pk = EVP_PKEY_new();
+    if (!pk)
+    {
+        return false;
+    }
+
 	// Check if the private key is the right type
 	if (!privateKey->isOfType(OSSLRSAPrivateKey::type))
 	{
 		// ERROR_MSG("Invalid key type supplied");
-
+        EVP_PKEY_free(pk);
 		return false;
 	}
 
@@ -1332,14 +1339,28 @@ bool OSSLRSA::decrypt(PrivateKey* privateKey, const ByteString& encryptedData,
 	if (encryptedData.size() != (size_t) RSA_size(rsa))
 	{
 		// ERROR_MSG("Invalid amount of input data supplied for RSA decryption");
-
+        EVP_PKEY_free(pk);
 		return false;
 	}
+
+    if (EVP_PKEY_assign_RSA(pk, rsa) <= 0)
+    {
+        EVP_PKEY_free(pk);
+        return false;
+    }
+
+    EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new(pk, NULL);
+    EVP_PKEY_free(pk);
+
+    if (!ctx || (EVP_PKEY_decrypt_init(ctx) <= 0))
+    {
+        return false;
+    }
 
 	// Determine the OpenSSL padding algorithm
 	int osslPadding = 0;
 
-	switch (padding)
+	switch (mechType)
 	{
 		case AsymMech::RSA_PKCS:
 			osslPadding = RSA_PKCS1_PADDING;
@@ -1355,19 +1376,48 @@ bool OSSLRSA::decrypt(PrivateKey* privateKey, const ByteString& encryptedData,
 			return false;
 	}
 
-	// Perform the RSA operation
+    // Set the RSA padding mode
+    if (EVP_PKEY_CTX_set_rsa_padding(ctx, osslPadding) <= 0)
+    {
+        return false;
+    }
+
+    if (mechType == AsymMech::RSA_PKCS_OAEP)
+    {
+        const EVP_MD *md;
+        switch (hashAlgo)
+        {
+            case CKM_SHA_1:
+                md = EVP_sha1();
+                break;
+            case CKM_SHA256:
+                md = EVP_sha256();
+                break;
+            case CKM_SHA384:
+                md = EVP_sha384();
+                break;
+            default:
+                return false;
+        }
+
+        if (EVP_PKEY_CTX_set_rsa_oaep_md(ctx, md) <= 0 ||
+            EVP_PKEY_CTX_set_rsa_mgf1_md(ctx, md) <= 0)
+        {
+            return false;
+        }
+    }
+
+	size_t outLen = (size_t) RSA_size(rsa);
 	data.resize(RSA_size(rsa));
 
-	int decSize = RSA_private_decrypt(encryptedData.size(), (unsigned char*) encryptedData.const_byte_str(), &data[0], rsa, osslPadding);
-
-	if (decSize == -1)
+    int decStatus = EVP_PKEY_decrypt(ctx, &data[0], &outLen, (unsigned char*) encryptedData.const_byte_str(), encryptedData.size());
+    if (decStatus <= 0)
 	{
 		// ERROR_MSG("RSA private key decryption failed (0x%08X)", ERR_get_error());
-
 		return false;
 	}
 
-	data.resize(decSize);
+    data.resize(outLen);
 
 	return true;
 }

@@ -259,7 +259,8 @@ bool OSSLEDDSA::encrypt(PublicKey* /*publicKey*/, const ByteString& /*data*/,
 
 // Decryption functions
 bool OSSLEDDSA::decrypt(PrivateKey* /*privateKey*/, const ByteString& /*encryptedData*/,
-			ByteString& /*data*/, const AsymMech::Type /*padding*/)
+			ByteString& /*data*/, const AsymMech::Type /*padding*/,
+            const CK_MECHANISM_TYPE /* hashAlgo */)
 {
 	// ERROR_MSG("EDDSA does not support decryption");
 

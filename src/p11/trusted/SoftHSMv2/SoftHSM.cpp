@@ -2097,6 +2097,12 @@ CK_RV SoftHSM::C_CopyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject
 		return rv;
 	}
 
+    // Restrict changing CKA_TOKEN attribute while copying object
+    if (isOnToken != wasOnToken)
+    {
+        return CKR_ACTION_PROHIBITED;
+    }
+
 	// Create the object in session or on the token
 	OSObject *newobject = NULL_PTR;
 	if (isOnToken)
@@ -2992,13 +2998,24 @@ CK_RV SoftHSM::AsymEncryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMec
 			isRSA = true;
 			break;
 		case CKM_RSA_PKCS_OAEP:
-			rv = MechParamCheckRSAPKCSOAEP(pMechanism);
-			if (rv != CKR_OK)
-				return rv;
+        {
+            rv = MechParamCheckRSAPKCSOAEP(pMechanism);
+            if (rv != CKR_OK)
+            {
+                return rv;
+            }
 
-			mechanism = AsymMech::RSA_PKCS_OAEP;
-			isRSA = true;
-			break;
+            CK_RSA_PKCS_OAEP_PARAMS_PTR params = (CK_RSA_PKCS_OAEP_PARAMS_PTR)pMechanism->pParameter;
+            if (params->hashAlg != CKM_SHA_1 ||
+                params->mgf != CKG_MGF1_SHA1)
+            {
+                return CKR_ARGUMENTS_BAD;
+            }
+
+            mechanism = AsymMech::RSA_PKCS_OAEP;
+            isRSA = true;
+            break;
+        }
 		default:
 			return CKR_MECHANISM_INVALID;
 	}
@@ -3865,26 +3882,24 @@ CK_RV SoftHSM::AsymDecryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMec
 			isRSA = true;
 			break;
 		case CKM_RSA_PKCS_OAEP:
-			if (pMechanism->pParameter == NULL_PTR ||
-			    pMechanism->ulParameterLen != sizeof(CK_RSA_PKCS_OAEP_PARAMS))
-			{
-				// DEBUG_MSG("pParameter must be of type CK_RSA_PKCS_OAEP_PARAMS");
-				return CKR_ARGUMENTS_BAD;
-			}
-			if (CK_RSA_PKCS_OAEP_PARAMS_PTR(pMechanism->pParameter)->hashAlg != CKM_SHA_1)
-			{
-				// DEBUG_MSG("hashAlg must be CKM_SHA_1");
-				return CKR_ARGUMENTS_BAD;
-			}
-			if (CK_RSA_PKCS_OAEP_PARAMS_PTR(pMechanism->pParameter)->mgf != CKG_MGF1_SHA1)
-			{
-				// DEBUG_MSG("mgf must be CKG_MGF1_SHA1");
-				return CKR_ARGUMENTS_BAD;
-			}
+        {
+            rv = MechParamCheckRSAPKCSOAEP(pMechanism);
+            if (rv != CKR_OK)
+            {
+                return rv;
+            }
 
-			mechanism = AsymMech::RSA_PKCS_OAEP;
-			isRSA = true;
-			break;
+            CK_RSA_PKCS_OAEP_PARAMS_PTR params = (CK_RSA_PKCS_OAEP_PARAMS_PTR)pMechanism->pParameter;
+            if (params->hashAlg != CKM_SHA_1 ||
+	            params->mgf != CKG_MGF1_SHA1)
+            {
+	            return CKR_ARGUMENTS_BAD;
+            }
+
+            mechanism = AsymMech::RSA_PKCS_OAEP;
+            isRSA = true;
+            break;
+	    }
 		default:
 			return CKR_MECHANISM_INVALID;
 	}
@@ -7987,11 +8002,21 @@ CK_RV SoftHSM::C_WrapKey
 			return CKR_ARGUMENTS_BAD;
 			break;
 		case CKM_RSA_PKCS_OAEP:
-			rv = MechParamCheckRSAPKCSOAEP(l_pMechanism);
-			if (rv != CKR_OK)
-				return rv;
-			break;
+        {
+            rv = MechParamCheckRSAPKCSOAEP(l_pMechanism);
+            if (rv != CKR_OK)
+            {
+                return rv;
+            }
 
+            CK_RSA_PKCS_OAEP_PARAMS_PTR params = (CK_RSA_PKCS_OAEP_PARAMS_PTR)l_pMechanism->pParameter;
+            if (params->hashAlg != CKM_SHA_1 ||
+                params->mgf != CKG_MGF1_SHA1)
+            {
+                return CKR_ARGUMENTS_BAD;
+            }
+            break;
+	    }
 		default:
 			return CKR_MECHANISM_INVALID;
 	}
@@ -8090,12 +8115,36 @@ CK_RV SoftHSM::C_WrapKey
     }
     else
     {
+#ifdef DISABLE_TOKEN_KEY_WRAP
+        // Fail wrapping a token key if public key hash is not embedded in build.
+        OSObject *hKeyObject = (OSObject *)handleManager->getObject(hKey);
+        if (hKeyObject == NULL_PTR || !hKeyObject->isValid())
+        {
+            return CKR_KEY_HANDLE_INVALID;
+        }
+
+        if (hKeyObject->getBooleanValue(CKA_TOKEN, false))
+        {
+            return CKR_ACTION_PROHIBITED;
+        }
+        else // Allow wrapping session key only when --enable-session-key-wrap is passed during build
+        {
+#ifndef SESSION_KEY_WRAP_SUPPORT
+            return CKR_ACTION_PROHIBITED;
+#endif
+        }
+#endif
         // Check the wrapping key handle.
         OSObject *wrapKey = (OSObject *)handleManager->getObject(hWrappingKey);
         if (wrapKey == NULL_PTR || !wrapKey->isValid()) return CKR_WRAPPING_KEY_HANDLE_INVALID;
 
         CK_BBOOL isWrapKeyOnToken = wrapKey->getBooleanValue(CKA_TOKEN, false);
         CK_BBOOL isWrapKeyPrivate = wrapKey->getBooleanValue(CKA_PRIVATE, true);
+
+        if (isWrapKeyOnToken)
+        {
+            return CKR_WRAPPING_KEY_HANDLE_INVALID;
+        }
 
 #ifdef DCAP_SUPPORT
         // If the key is used for quote generation should not be used for wrapping
@@ -8551,7 +8600,8 @@ CK_RV SoftHSM::UnwrapKeyAsym
 	ByteString& wrapped,
 	Token* token,
 	OSObject* unwrapKey,
-	ByteString& keydata
+	ByteString& keydata,
+    const CK_MECHANISM_TYPE hashAlgo
 )
 {
 	// Get the symmetric algorithm matching the mechanism
@@ -8598,12 +8648,203 @@ CK_RV SoftHSM::UnwrapKeyAsym
 
 	// Unwrap the key
 	CK_RV rv = CKR_OK;
-	if (!cipher->unwrapKey(unwrappingkey, wrapped, keydata, mode))
+    if (!cipher->unwrapKey(unwrappingkey, wrapped, keydata, mode, hashAlgo))
 		rv = CKR_GENERAL_ERROR;
 	cipher->recyclePrivateKey(unwrappingkey);
 	CryptoFactory::i()->recycleAsymmetricAlgorithm(cipher);
 	return rv;
 }
+
+#ifndef DISABLE_TOKEN_KEY_WRAP
+static std::string getDigest(const ByteString& dataToHash)
+{
+    std::string digest;
+    ByteString hash;
+    HashAlgorithm* hashAlgo = CryptoFactory::i()->getHashAlgorithm(HashAlgo::SHA384);
+
+    if (hashAlgo &&
+        hashAlgo->hashInit() &&
+        hashAlgo->hashUpdate(dataToHash) &&
+        hashAlgo->hashFinal(hash))
+    {
+        char hex[3];
+        for (size_t i = 0; i < hash.size(); i++)
+        {
+            snprintf(hex, 3, "%02x", hash[i]);
+            digest += hex;
+        }
+    }
+
+    CryptoFactory::i()->recycleHashAlgorithm(hashAlgo);
+    return digest;
+}
+
+static CK_RV verifyRsaPublicKeyDigest(const ByteString& modulus, ByteString& exponent)
+{
+    ByteString hexExponent;
+    char hex[3];
+
+    for (size_t i = 0; i < exponent.size(); i++)
+    {
+        snprintf(hex, 3, "%02x", exponent[i]);
+        hexExponent += hex[0];
+        hexExponent += hex[1];
+    }
+
+    // Trim initial zero if present.
+    if (hexExponent[0] == '0')
+    {
+        hexExponent = hexExponent.substr(1,hexExponent.size());
+    }
+
+    ByteString dataToHash = modulus + hexExponent;
+    std::string hexDigest = getDigest(dataToHash);
+    if (hexDigest.empty())
+    {
+        return CKR_GENERAL_ERROR;
+    }
+
+    std::string hashFromBuild{PUBKEY_HASH};
+    if (hexDigest != hashFromBuild)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    return CKR_OK;
+}
+
+static CK_RV verifySignature(const ByteString& modulus,
+                             const ByteString& exponent,
+                             const ByteString& wrappedKey,
+                             const ByteString& signature,
+                             const size_t&     pssParamsLen)
+{
+    RSA_PKCS_PSS_PARAMS pssParam{HashAlgo::SHA384, AsymRSAMGF::MGF1_SHA384, pssParamsLen};
+    void* param     = &pssParam;
+    size_t paramLen = sizeof(pssParam);
+    AsymMech::Type mechanism = AsymMech::RSA_SHA384_PKCS_PSS;
+    PublicKey* publicKey;
+
+    AsymmetricAlgorithm* rsa = CryptoFactory::i()->getAsymmetricAlgorithm(AsymAlgo::RSA);
+    if (!rsa)
+    {
+        return CKR_GENERAL_ERROR;
+    }
+
+    ByteString serialisedPublicKey = modulus.serialise() + exponent.serialise();
+    if (!rsa->reconstructPublicKey(&publicKey, serialisedPublicKey))
+    {
+        rsa->recyclePublicKey(publicKey);
+        CryptoFactory::i()->recycleAsymmetricAlgorithm(rsa);
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    if (!publicKey)
+    {
+        CryptoFactory::i()->recycleAsymmetricAlgorithm(rsa);
+        return CKR_GENERAL_ERROR;
+    }
+
+    if (!rsa->verifyInit(publicKey, mechanism, param, paramLen))
+    {
+        rsa->recyclePublicKey(publicKey);
+        CryptoFactory::i()->recycleAsymmetricAlgorithm(rsa);
+        return CKR_MECHANISM_INVALID;
+    }
+
+    if (!rsa->verifyUpdate(wrappedKey) ||
+        !rsa->verifyFinal(signature))
+    {
+        rsa->recyclePublicKey(publicKey);
+        CryptoFactory::i()->recycleAsymmetricAlgorithm(rsa);
+        return CKR_SIGNATURE_INVALID;
+    }
+
+    rsa->recyclePublicKey(publicKey);
+    CryptoFactory::i()->recycleAsymmetricAlgorithm(rsa);
+
+    return CKR_OK;
+}
+
+static inline bool validateUnwrapParams(const CK_UNWRAP_KEY_PARAMS params, const CK_ULONG& ulDataLen)
+{
+    const CK_ULONG modulusLenAllowed = 384, minLength = 0xFF, maxLength = 0xFFFF;
+
+    if (ulDataLen < minLength || ulDataLen > maxLength ||
+        !params.pMechanism ||
+        !params.pMechanism->pParameter ||
+        params.pMechanism->ulParameterLen != sizeof(CK_RSA_PKCS_PSS_PARAMS) ||
+        params.pMechanism->mechanism != CKM_SHA384_RSA_PKCS_PSS ||
+        CK_RSA_PKCS_PSS_PARAMS_PTR(params.pMechanism->pParameter)->hashAlg != CKM_SHA384 ||
+        CK_RSA_PKCS_PSS_PARAMS_PTR(params.pMechanism->pParameter)->mgf != CKG_MGF1_SHA384 ||
+        params.modulusLen != modulusLenAllowed ||
+        params.exponentLen > maxLength||
+        params.signatureLen > maxLength ||
+        params.wrappedKeyLen > maxLength)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+static bool extractSignatureIngredients(const CK_BYTE_PTR pData,
+                                        const CK_ULONG&   ulDataLen,
+                                        ByteString&       modulus,
+                                        ByteString&       exponent,
+                                        ByteString&       signature,
+                                        ByteString&       wrappedKey,
+                                        size_t&           pssParamsLen)
+{
+    CK_UNWRAP_KEY_PARAMS params;
+    size_t paramsLen = sizeof(params);
+
+    memcpy_s(&params, paramsLen, pData, paramsLen);
+    if (!validateUnwrapParams(params, ulDataLen))
+    {
+        return false;
+    }
+
+    pssParamsLen = CK_RSA_PKCS_PSS_PARAMS_PTR(params.pMechanism->pParameter)->sLen;
+
+    modulus.resize(params.modulusLen);
+    exponent.resize(params.exponentLen);
+    signature.resize(params.signatureLen);
+    wrappedKey.resize(params.wrappedKeyLen);
+
+    CK_ULONG offset = paramsLen;
+    memcpy_s(modulus.byte_str(), modulus.size(), pData + offset, params.modulusLen);
+    offset += params.modulusLen;
+    memcpy_s(exponent.byte_str(), exponent.size(), pData + offset, params.exponentLen);
+    offset += params.exponentLen;
+    memcpy_s(signature.byte_str(), signature.size(), pData + offset, params.signatureLen);
+    offset += params.signatureLen;
+    memcpy_s(wrappedKey.byte_str(), wrappedKey.size(), pData + offset, params.wrappedKeyLen);
+
+    return true;
+}
+
+static CK_RV verifyAndExtractWrappedKey(const CK_BYTE_PTR pData, const CK_ULONG& ulDataLen, ByteString& wrappedKey)
+{
+    ByteString modulus, exponent, signature;
+    size_t pssParamsLen;
+
+    if(!extractSignatureIngredients(pData, ulDataLen, modulus, exponent, signature, wrappedKey, pssParamsLen))
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    // Verify digest
+    CK_RV rv = verifyRsaPublicKeyDigest(modulus, exponent);
+    if (CKR_OK != rv)
+    {
+        return rv;
+    }
+
+    // Verify signature
+    return verifySignature(modulus, exponent, wrappedKey, signature, pssParamsLen);
+}
+#endif
 
 // Unwrap the specified key using the specified unwrapping key
 CK_RV SoftHSM::C_UnwrapKey
@@ -8625,6 +8866,7 @@ CK_RV SoftHSM::C_UnwrapKey
 
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	if (pWrappedKey == NULL_PTR) return CKR_ARGUMENTS_BAD;
+    if (ulWrappedKeyLen == 0) return CKR_ARGUMENTS_BAD;
 	if (pTemplate == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	if (hKey == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
@@ -8709,7 +8951,21 @@ CK_RV SoftHSM::C_UnwrapKey
 	Session* session = (Session*)handleManager->getSession(hSession);
 	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
 
-	CK_RV rv;
+    ByteString wrappedKey;
+	CK_RV rv = CKR_GENERAL_ERROR;
+#ifdef DISABLE_TOKEN_KEY_WRAP
+    wrappedKey.resize(ulWrappedKeyLen);
+    memcpy_s(wrappedKey.byte_str(), wrappedKey.size(), pWrappedKey, ulWrappedKeyLen);
+#else
+    rv = verifyAndExtractWrappedKey(pWrappedKey, ulWrappedKeyLen, wrappedKey);
+    if (rv != CKR_OK)
+    {
+        return rv;
+    }
+#endif
+
+    CK_ULONG wrappedKeyLen = wrappedKey.size();
+
 	// Check the mechanism
 	switch(l_pMechanism->mechanism)
 	{
@@ -8722,7 +8978,7 @@ CK_RV SoftHSM::C_UnwrapKey
             break;
 #ifdef HAVE_AES_KEY_WRAP
 		case CKM_AES_KEY_WRAP:
-			if ((ulWrappedKeyLen < 24) || ((ulWrappedKeyLen % 8) != 0))
+			if ((wrappedKeyLen < 24) || ((wrappedKeyLen % 8) != 0))
 				return CKR_WRAPPED_KEY_LEN_RANGE;
 			// Does not handle optional init vector
 			if (l_pMechanism->pParameter != NULL_PTR ||
@@ -8732,7 +8988,7 @@ CK_RV SoftHSM::C_UnwrapKey
 #endif
 #ifdef HAVE_AES_KEY_WRAP_PAD
 		case CKM_AES_KEY_WRAP_PAD:
-			if ((ulWrappedKeyLen < 16) || ((ulWrappedKeyLen % 8) != 0))
+			if ((wrappedKeyLen < 16) || ((wrappedKeyLen % 8) != 0))
 				return CKR_WRAPPED_KEY_LEN_RANGE;
 			// Does not handle optional init vector
 			if (l_pMechanism->pParameter != NULL_PTR ||
@@ -8744,11 +9000,39 @@ CK_RV SoftHSM::C_UnwrapKey
 			// Input length checks needs to be done later when unwrapping key is known
 			break;
 		case CKM_RSA_PKCS_OAEP:
-			rv = MechParamCheckRSAPKCSOAEP(l_pMechanism);
-			if (rv != CKR_OK)
-				return rv;
-			break;
+            {
+                rv = MechParamCheckRSAPKCSOAEP(l_pMechanism, CK_TRUE);
+                if (rv != CKR_OK)
+                {
+                    return rv;
+                }
 
+                CK_RSA_PKCS_OAEP_PARAMS_PTR params = (CK_RSA_PKCS_OAEP_PARAMS_PTR)l_pMechanism->pParameter;
+                CK_MECHANISM_TYPE hashAlgo = params->hashAlg;
+                CK_RSA_PKCS_MGF_TYPE mgf = params->mgf;
+                CK_RSA_PKCS_MGF_TYPE allowedMgf;
+
+                switch (hashAlgo)
+                {
+                    case CKM_SHA_1:
+                        allowedMgf = CKG_MGF1_SHA1;
+                        break;
+                    case CKM_SHA256:
+                        allowedMgf = CKG_MGF1_SHA256;
+                        break;
+                    case CKM_SHA384:
+                        allowedMgf = CKG_MGF1_SHA384;
+                        break;
+                    default:
+                        return CKR_ARGUMENTS_BAD;
+                }
+
+                if (mgf != allowedMgf)
+                {
+                    return CKR_ARGUMENTS_BAD;
+                }
+                break;
+            }
 		default:
 			return CKR_MECHANISM_INVALID;
 	}
@@ -8764,6 +9048,10 @@ CK_RV SoftHSM::C_UnwrapKey
 	CK_BBOOL isUnwrapKeyOnToken = unwrapKey->getBooleanValue(CKA_TOKEN, false);
 	CK_BBOOL isUnwrapKeyPrivate = unwrapKey->getBooleanValue(CKA_PRIVATE, true);
 
+    if (isUnwrapKeyOnToken)
+    {
+        return CKR_UNWRAPPING_KEY_HANDLE_INVALID;
+    }
 	// Check user credentials
 	rv = haveRead(session->getState(), isUnwrapKeyOnToken, isUnwrapKeyPrivate);
 	if (rv != CKR_OK)
@@ -8927,14 +9215,14 @@ CK_RV SoftHSM::C_UnwrapKey
         }
 
         CK_ULONG ulDataLen = 0;
-        rv = SymDecrypt(session, pWrappedKey, ulWrappedKeyLen, NULL_PTR, &ulDataLen);
+        rv = SymDecrypt(session, wrappedKey.byte_str(), wrappedKeyLen, NULL_PTR, &ulDataLen);
         if (rv != CKR_OK)
         {
             return rv;
         }
 
         keydata.resize(ulDataLen);
-        rv = SymDecrypt(session, pWrappedKey, ulWrappedKeyLen, keydata.byte_str(), &ulDataLen);
+        rv = SymDecrypt(session, wrappedKey.byte_str(), wrappedKeyLen, keydata.byte_str(), &ulDataLen);
         if (rv != CKR_OK)
         {
             return rv;
@@ -8944,41 +9232,40 @@ CK_RV SoftHSM::C_UnwrapKey
     }
     else
     {
-        ByteString wrapped(pWrappedKey, ulWrappedKeyLen);
+        ByteString wrapped(wrappedKey.byte_str(), wrappedKeyLen);
         if (unwrapKey->getUnsignedLongValue(CKA_CLASS, CKO_VENDOR_DEFINED) == CKO_SECRET_KEY)
         {	 
             rv = UnwrapKeySym(l_pMechanism, wrapped, token, unwrapKey, keydata);
         }
         else if (unwrapKey->getUnsignedLongValue(CKA_CLASS, CKO_VENDOR_DEFINED) == CKO_PRIVATE_KEY)
         {
-            rv = UnwrapKeyAsym(l_pMechanism, wrapped, token, unwrapKey, keydata);
-#if defined (DCAP_SUPPORT) && defined (EPHEMERAL_QUOTE)
-            // If the key is used for quote generation should be used for only one unwrap operation
-            // Destroying the key from session
-            CK_BBOOL isUsedForQuoteGeneration = unwrapKey->getBooleanValue(CKA_USED_FOR_QUOTE_GENERATION, false);
-
-            if (isUsedForQuoteGeneration)
+            CK_MECHANISM_TYPE hashAlgo = CKM_SHA_1;
+            if (CKM_RSA_PKCS_OAEP == l_mechanism.mechanism)
             {
-                // get public key and destroying both keys
-                CK_OBJECT_HANDLE publicKeyHandle = getRSAPairKey(hSession, hUnwrappingKey);
-                if (CK_INVALID_HANDLE == publicKeyHandle)
-                {
-                    return CKR_KEY_HANDLE_INVALID;
-                }
+                CK_RSA_PKCS_OAEP_PARAMS_PTR param = (CK_RSA_PKCS_OAEP_PARAMS_PTR)parameter;
+                hashAlgo = param->hashAlg;
+            }
 
-                // destroying public key
-                OSObject* obj = (OSObject*)handleManager->getObject(publicKeyHandle);
-                if (obj)
-                {
-                    obj->destroyObject();
-                }
-                handleManager->destroyObject(publicKeyHandle);
-                publicKeyHandle = CK_INVALID_HANDLE;
+            rv = UnwrapKeyAsym(l_pMechanism, wrapped, token, unwrapKey, keydata, hashAlgo);
+#ifdef DCAP_SUPPORT
+            if (CKR_OK == rv)
+            {
+                // If the key is used for quote generation should be used for only one unwrap operation
+                // Destroying the public key from session
+                CK_BBOOL isUsedForQuoteGeneration = unwrapKey->getBooleanValue(CKA_USED_FOR_QUOTE_GENERATION, false);
 
-                // destroying private key
-                handleManager->destroyObject(hUnwrappingKey);
-                unwrapKey->destroyObject();
-                hUnwrappingKey = CK_INVALID_HANDLE;
+                if (isUsedForQuoteGeneration)
+                {
+                    // get public key
+                    CK_OBJECT_HANDLE publicKeyHandle = getRSAPairKey(hSession, hUnwrappingKey);
+                    if (CK_INVALID_HANDLE == publicKeyHandle)
+                    {
+                        return CKR_KEY_HANDLE_INVALID;
+                    }
+
+                    // destroying public key
+                    C_DestroyObject(hSession, publicKeyHandle);
+                }
             }
 #endif
         }
@@ -9087,6 +9374,11 @@ CK_RV SoftHSM::C_UnwrapKey
 			lhKey = CK_INVALID_HANDLE;
 		}
 	}
+    else
+    {
+        // Destroy the key used for unwrapping.
+        C_DestroyObject(hSession, hUnwrappingKey);
+    }
 
     *hKey = lhKey;
 
@@ -14552,7 +14844,7 @@ bool SoftHSM::setGOSTPrivateKey(OSObject* key, const ByteString &ber, Token* tok
 }
 #endif //Unsupported by Crypto API Toolkit
 
-CK_RV SoftHSM::MechParamCheckRSAPKCSOAEP(CK_MECHANISM_PTR pMechanism)
+CK_RV SoftHSM::MechParamCheckRSAPKCSOAEP(CK_MECHANISM_PTR pMechanism, const CK_BBOOL fromUnwrapKey)
 {
 	// This is a programming error
 	if (pMechanism->mechanism != CKM_RSA_PKCS_OAEP) {
@@ -14566,18 +14858,7 @@ CK_RV SoftHSM::MechParamCheckRSAPKCSOAEP(CK_MECHANISM_PTR pMechanism)
 		// ERROR_MSG("pParameter must be of type CK_RSA_PKCS_OAEP_PARAMS");
 		return CKR_ARGUMENTS_BAD;
 	}
-
-	CK_RSA_PKCS_OAEP_PARAMS_PTR params = (CK_RSA_PKCS_OAEP_PARAMS_PTR)pMechanism->pParameter;
-	if (params->hashAlg != CKM_SHA_1)
-	{
-		// ERROR_MSG("hashAlg must be CKM_SHA_1");
-		return CKR_ARGUMENTS_BAD;
-	}
-	if (params->mgf != CKG_MGF1_SHA1)
-	{
-		// ERROR_MSG("mgf must be CKG_MGF1_SHA1");
-		return CKR_ARGUMENTS_BAD;
-	}
+    CK_RSA_PKCS_OAEP_PARAMS_PTR params = (CK_RSA_PKCS_OAEP_PARAMS_PTR)pMechanism->pParameter;
 	if (params->source != CKZ_DATA_SPECIFIED)
 	{
 		// ERROR_MSG("source must be CKZ_DATA_SPECIFIED");

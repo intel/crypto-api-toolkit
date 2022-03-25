@@ -98,18 +98,50 @@ AS_IF([test "x$ENABLE_DCAP" = "xyes"],
       ]
       )
 
-AC_ARG_ENABLE([ephemeral-quote],
-              AC_HELP_STRING([--enable-ephemeral-quote], [Requires this option to destroy quote generation key after one unwrap]),
-              [EPHEMERAL_QUOTE_SUPPORT="${enableval}"],
-              [echo "--with-ephemeral-quote option not set. Quote genration key is not destroyed after one unwrap"; EPHEMERAL_QUOTE_SUPPORT="no"])
-
-AS_IF([test "x$EPHEMERAL_QUOTE_SUPPORT" = "xyes"],
-      [AC_DEFINE([EPHEMERAL_QUOTE], [], [EPHEMERAL QUOTE])])
-
 AC_ARG_ENABLE([multiprocess-support],
               AC_HELP_STRING([--disable-multiprocess-support ], [If the token is not expected to be simultaneously accessed for modification by multiple processes (write/update/delete), this flag can give a performance boost.]),
               [AC_DEFINE([MULTIPROCESS_SUPPORT_DISABLED], [], [MULTIPROCESS SUPPORT DISABLED])],
               [echo "--disable-multiprocess-support option not set. If the token is not expected to be simultaneously accessed for modification by multiple processes (write/update/delete), this flag can give a performance boost."])
+
+AC_ARG_WITH([public-key],
+            AC_HELP_STRING([--with-public-key], [Public key to be embedded into CTK build]),
+            [PUBKEY="${withval}"],
+            [echo "--with-public-key option not set"; PUBKEY=""])
+
+if test "${PUBKEY}" == ""; then
+    AC_DEFINE_UNQUOTED([PUBKEY_HASH], "", [RSA public key hash])
+    AC_DEFINE([DISABLE_TOKEN_KEY_WRAP], [], [Disable wrapping a token key])
+else
+    hash=$( (openssl rsa -RSAPublicKey_in -in ${PUBKEY} -modulus -noout | grep 'Modulus=' | cut -d'=' -f 2 | tr -d "\n\r" | xxd -r -p && openssl rsa -RSAPublicKey_in -in ${PUBKEY} -text -noout | grep Exponent | cut -d'x' -f 3 | sed 's/.$//' | tr -d "\n\r") | sha384sum | cut -d' ' -f 1 )
+    AC_DEFINE_UNQUOTED([PUBKEY_HASH], "$hash", [RSA public key hash])
+    keyLength=$( (openssl rsa -RSAPublicKey_in -in ${PUBKEY} -noout -text | grep "RSA Public-Key:" | cut -d" " -f 3 | cut -c2- | tr -d "\n\r"))
+    if test $keyLength != "3072"; then
+        AC_MSG_ERROR([Please pass an RSA 3072 bit public key])
+    fi
+fi
+
+AC_ARG_WITH([private-key],
+            AC_HELP_STRING([--with-private-key], [Test purpose only, private key to enable C_Wrapkey calls in p11test.]),
+            [PRIVKEY="${withval}"],
+            [echo "--with-private-key option not set."; PRIVKEY=""])
+
+if test "${PRIVKEY}" != ""; then
+    echo "***************************************************************************************************************"
+    echo "************************************************** WARNING ****************************************************"
+    echo "***************************************************************************************************************"
+    echo "--with-private-key OPTION MUST BE USED FOR TESTING PURPOSES ONLY. DO NOT USE THIS OPTION IN RELEASE/PRODUCTION."
+    echo "***************************************************************************************************************"
+    echo "***************************************************************************************************************"
+    echo "***************************************************************************************************************"
+fi
+
+AC_DEFINE_UNQUOTED([PRIVATE_KEY], "${PRIVKEY}", [RSA private key path])
+AC_DEFINE_UNQUOTED([PUBLIC_KEY], "${PUBKEY}", [RSA public key path])
+
+AC_ARG_ENABLE([session-key-wrap],
+              AC_HELP_STRING([--enable-session-key-wrap ], [This option enables wrapping a session key.]),
+              [AC_DEFINE([SESSION_KEY_WRAP_SUPPORT], [], [WRAPPING A SESSION KEY IS SUPPORTED])],
+              [echo "--enable-session-key-wrap option not set. Session keys cannot be wrapped."])
 
 AC_SUBST(SGXSDKDIR, $SGXSDK)
 AC_SUBST(SGXSSLDIR, $SGXSSL)
@@ -153,6 +185,7 @@ AC_DEFINE([WITH_ECC], [], [WITH ECC])
 AC_DEFINE([WITH_EDDSA], [], [WITH EDDSA])
 
 AM_CONDITIONAL(AES_UNWRAP_RSA, false)
+AM_CONDITIONAL(RSA_OAEP_UNWRAP, false)
 
 AC_OUTPUT
 

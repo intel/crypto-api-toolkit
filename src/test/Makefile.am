@@ -25,6 +25,7 @@ noinst_PROGRAMS =  p11test
 
 p11test_SOURCES =   p11test.cpp                 \
                     SymmetricAlgorithmTests.cpp \
+                    UnwrapKeyHelper.cpp         \
                     DigestTests.cpp             \
                     InitTests.cpp               \
                     InfoTests.cpp               \
@@ -39,11 +40,6 @@ p11test_SOURCES =   p11test.cpp                 \
                     UnsupportedAPITests.cpp     \
                     TestsBase.cpp               \
                     TestsNoPINInitBase.cpp
-
-if AES_UNWRAP_RSA
 AM_LDFLAGS = -ldl $(DCAP_LIB) -L../p11/untrusted/.libs -lp11sgx -lcppunit -no-install -pthread -L/usr/local/lib -lssl -lcrypto -static -Wl,-z,relro -Wl,-z,now
-else
-AM_LDFLAGS = -ldl $(DCAP_LIB) -L../p11/untrusted/.libs -lp11sgx -lcppunit -no-install -pthread -static -Wl,-z,relro -Wl,-z,now -L/usr/local/lib
-endif
 
 EXTRA_DIST =    $(srcdir)/*.h

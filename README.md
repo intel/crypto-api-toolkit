@@ -49,6 +49,8 @@ The common software requirements for building the CTK are listed below. Please r
 - autotools (autoconf, automake, libtool)
 - g++ compiler with C++11 support
 - libcppunit-dev (for building and running the tests)
+- unzip
+- openssl
 
   For example in Ubuntu, the build tools and libraries can be obtained by running the command  
 
@@ -56,11 +58,11 @@ The common software requirements for building the CTK are listed below. Please r
   ``$ sudo apt-get install dkms libprotobuf10 autoconf libcppunit-dev autotools-dev libc6-dev libtool build-essential``
 
 - Intel(R) SGX software components  
-  -  The SDK, driver and PSW can be downloaded and installed from <a href=https://01.org/intel-softwareguard-extensions/downloads/intel-sgx-linux-2.13.3-release>Intel SGX Linux 2.13.3 Release</a> or can be built from the source from https://github.com/intel/linux-sgx. In-kernel versions of the SGX driver can also be used (from Linux kernel versions 5.11).
-  - Intel(R) SGX SSL - The current release of CTK automatically builds and installs Intel(R) SGX SSL with OpenSSL version 1.1.1k if not installed already. Alternatively, it can be built from the source and installed from https://github.com/intel/intel-sgx-ssl. CTK has been validated with Intel(R) SGX SSL built with OpenSSL version 1.1.1k without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
+  -  The SDK, driver and PSW can be downloaded and installed from <a href=https://01.org/intel-softwareguard-extensions/downloads/intel-sgx-linux-2.13.3-release>Intel SGX Linux 2.15.1 Release</a> or can be built from the source from https://github.com/intel/linux-sgx. In-kernel versions of the SGX driver can also be used (from Linux kernel versions 5.11).
+  - Intel(R) SGX SSL - The current release of CTK automatically builds and installs Intel(R) SGX SSL with OpenSSL version 1.1.1n if not installed already. Alternatively, it can be built from the source and installed from https://github.com/intel/intel-sgx-ssl. CTK has been validated with Intel(R) SGX SSL built with OpenSSL version 1.1.1n without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
   - (For DCAP support) The latest version of DCAP binaries and driver can be downloaded and installed from https://01.org/intel-software-guard-extensions/downloads or built from the source from https://github.com/intel/SGXDataCenterAttestationPrimitives.
 
-> **NOTE** This version of CTK is configured to build with, and validated against Intel SGX SDK v2.13.3, SGX driver v2.11.0_2d2b795 (and the in-kernel version of SGX driver), and SGXSSL binaries without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
+> **NOTE** This version of CTK is configured to build with, and validated against Intel SGX SDK v2.15.1, SGX driver v2.11.0_2d2b795 (and the in-kernel version of SGX driver), and SGXSSL binaries without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
 
 ## Building the source
 
@@ -70,7 +72,7 @@ The common software requirements for building the CTK are listed below. Please r
 - The `HeapMaxSize` in the configuration XML is by default set to 0xA00000. Please tune this parameter based on your application's requirements.
 > **NOTE** Please go through https://github.com/intel/linux-sgx/blob/master/psw/ae/ref_le/ref_le.md to learn about whitelisting the release enclave.
 
-### Preparing the source for the build  
+### Preparing the source for the build
 After downloading the souce, run ``sh autogen.sh``
 
 ``$ sh autogen.sh``
@@ -82,16 +84,18 @@ The source can be configured by running ``./configure``
 
 The options that ``configure`` supports can be obtained by running ``./configure --help``. Below are the options that are specific to CTK:
 
-| Option  | Detail | Default value |
+| Option  | Detail | Default value/Notes |
 | ------------- | ------------- | ----- |
 |--with-sgxsdk | SGX SDK installation path | /opt/intel/sgxsdk |
 |--with-sgxssl | SGX SSL installation path | /opt/intel/sgxssl |
 |--with-token-path | Path where PKCS11 tokens and objects will be stored | /opt/intel/cryptoapitoolkit |
 |--enable-dcap | Build with DCAP support | Build without DCAP support  |
-|--enable-ephemeral-quote | Destroy the key used for quote generation after one unwrap | Don't destroy |
 |--with-p11-kit-path | p11-kit include directory path | Build without p11-kit, using PKCS11 headers from CTK |
-|--enable-mitigation | Enable mitigations for CVE-2020-0551 (LVI) and other vulnerabilities | Mitigations disabled for CVE-2020-0551 (LVI) and other vulnerabilities |
 |--disable-multiprocess-support | If the token is not expected to be simultaneously accessed for modification by multiple processes (write/update/delete), this flag can give a performance boost. | The token and the objects are allowed to be modified (write/update/delete) by multiple processes simultaneously.
+|--enable-session-key-wrap | Enable wrapping a session key when public key is not passed during build (please see the below row) | Wrapping session keys is not allowed.
+|--with-public-key | Path to RSA 3072-bit public key in ``PEM DER ASN.1 PKCS#1`` format |
+|--with-private-key | Path to RSA 3072-bit private key in ``PEM DER ASN.1 PKCS#1`` format | This build option MUST be used only for test purposes.
+|--enable-mitigation | Enable mitigations for CVE-2020-0551 (LVI) and other vulnerabilities | Mitigations disabled for CVE-2020-0551 (LVI) and other vulnerabilities
 
 ### Compiling
 ``$ make``
@@ -186,6 +190,44 @@ CKM_EXPORT_ECDSA_QUOTE_RSA_PUBLIC_KEY<sup>2</sup>
 
 CTK supports most of the attributes listed in the PKCS11 specification with some restrictions. Please see the section on **Restrictions** below in this document.
 
+
+### Support for wrapping and unwrapping
+
+CTK by default disables support for wrapping and exporting keys outside the enclave except with CKM_EXPORT_ECDSA_QUOTE_RSA_PUBLIC_KEY for generating the quote, but can be configured to support wrapping of the keys at build time by using one of the following methods.
+
+#### Enabling session keys wrap
+
+By configuring the build with `--enable-session-key-wrap` CTK can be built to support wrapping and exporting session keys (in-memory) that are created.
+
+#### Enabling authorized unwrapping
+
+To authorize only a trusted application to unwrap the keys inside the enclave, Crypto API Toolkit necessitates that a 384-bit hash of an RSA 3072-bit public key be embedded as part of the enclave binary. This is done via passing the public key using the option `--with-public-key` while configuring the build. For unwrapping a key blob inside the enclave, the private portion of this keypair (which remains with the application that owns it in a secure location) must be used to sign the wrapped key blob and pass it during the `C_UnwrapKey` operation along with the signature and the public portion of the key as described below.
+
+1. Extract the `modulus` and the `exponent` from RSA public key used during CTK build (via `--with-public-key-path` option). This must be a 3072-bit RSA key.
+2. Sign the wrapped key to be unwrapped inside the enclave with the private portion of the key that was passed during the build using `--with-public-key` option using the mechanism `CKM_SHA384_RSA_PKCS_PSS`.
+3. Fill the following structure
+```cpp
+typedef struct CK_UNWRAP_KEY_PARAMS{
+    CK_ULONG         modulusLen;
+    CK_ULONG         exponentLen;
+    CK_ULONG         signatureLen;
+    CK_ULONG         wrappedKeyLen;
+    CK_MECHANISM_PTR pMechanism;
+} CK_UNWRAP_KEY_PARAMS;
+```
+4. Fill `pWrappedKey` parameter of the `C_UnwrapKey` API in the format below. The parameter `ulWrappedKeyLen` of the same API must be set to the size of this structure.
+
+<!-- language: lang-none -->
+    --------------------------------------------------------------------------------------------------------------
+    |          CK_UNWRAP_KEY_PARAMS       |    modulus   |    exponent   |  signature  |      wrappedKey         |
+    --------------------------------------------------------------------------------------------------------------
+
+The `CK_RSA_PKCS_PSS_PARAMS` structure passed as `pMechanism` must set `hashAlg` to `CKM_SHA384` and its `mgf` to `CKG_MGF1_SHA384`.
+
+Please refer `getUnwrapParams` from [src/test/UnwrapKeyHelper.cpp](src/test/UnwrapKeyHelper.cpp) to see how the above steps are done. The RSA keypair can be generated using the openssl commands below, if needed:
+- The private portion of the keypair can be generated using `openssl genrsa -out privateKey.pem 3072`
+- Using the private key generated above, the corresponding public portion of the corresponding keypair can be generated using `openssl rsa -in privateKey.pem -outform PEM -RSAPublicKey_out -out publicKey.pem`
+
 ## Quote Generation and Verification
 
 ### Quote Generation
@@ -250,15 +292,18 @@ CTK imposes certain restrictions to further harden the security. They are listed
   - CKA_EXPONENT_1
   - CKA_EXPONENT_2
   - CKA_COEEFICIENT
-  
+
+- **C_CopyObject**: A token object can only be copied as a token object and a session object can only be copied as a session object using C_CopyObject API.
+
 - **C_WrapKey**, **C_UnwrapKey**:
   - A wrapped key can get unwrapped only inside the enclave. It cannot be extracted to come out in the clear.
   - A key used for wrapping cannot be used for encryption or decryption.
   - If the key that is used for wrapping another key was used for encrypting data earlier, that encrypted data cannot be decrypted after the wrapping operation.
   - The key used to generate a quote can only be an RSA public key.
   - The key used to generate a quote cannot be created with CKA_TOKEN attribute set to true. It must be a session key object.
-  - If CTK is built with ephemeral key for quote generation, the key (pair) will be destroyed after using the key for one unwrap operation.
   - The key used to generate a quote cannot be used for sign and verify operations in addition to encryption and decryption operations.
+  - The key that is used for wrap and unwrap operations can only be a session key.
+  - The key used to unwrap another key is destroyed automatically on a successful call to C_UnwrapKey.
 
 ## Using Crypto API Toolkit
 

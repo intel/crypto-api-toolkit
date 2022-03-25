@@ -34,18 +34,19 @@
 #define _SOFTHSM_V2_SYMENCRYPTDECRYPTTESTS_H
 
 #include "TestsBase.h"
+#include "UnwrapKeyHelper.h"
 #include <cppunit/extensions/HelperMacros.h>
 
 class SymmetricAlgorithmTests : public TestsBase
 {
 	CPPUNIT_TEST_SUITE(SymmetricAlgorithmTests);
 	CPPUNIT_TEST(testAesEncryptDecrypt);
+    CPPUNIT_TEST(testUnwrapMasterAes);
 #if 0 // Unsupported by Crypto API Toolkit
 	CPPUNIT_TEST(testDesEncryptDecrypt);
 #endif // Unsupported by Crypto API Toolkit
     CPPUNIT_TEST(testAesWrapUnwrap);
 #ifdef SGXHSM
-    CPPUNIT_TEST(testAesWrapUnwrapTokenObject);
 #ifdef WITH_AES_GCM
     CPPUNIT_TEST(testAesGcmEncryptDecrypt);
 #endif
@@ -64,6 +65,7 @@ class SymmetricAlgorithmTests : public TestsBase
 
 public:
 	void testAesEncryptDecrypt();
+    void testUnwrapMasterAes();
     void testRsaWrapWithAes();
 #ifdef SGXHSM
     void testAesWrapUnwrapTokenObject();
@@ -86,10 +88,30 @@ public:
 #endif // Unsupported by Crypto API Toolkit
 
 protected:
+    UnwrapKeyHelper unwrapKeyHelper;
 #if 0 // Unsupported by Crypto API Toolkit
 	CK_RV generateGenericKey(CK_SESSION_HANDLE hSession, CK_BBOOL bToken, CK_BBOOL bPrivate, CK_OBJECT_HANDLE &hKey);
 #endif // Unsupported by Crypto API Toolkit
 	CK_RV generateAesKey(CK_SESSION_HANDLE hSession, CK_BBOOL bToken, CK_BBOOL bPrivate, CK_OBJECT_HANDLE &hKey);
+    CK_RV generateRsaKeyPair(CK_SESSION_HANDLE hSession, CK_BBOOL bToken, CK_BBOOL bPrivate, CK_OBJECT_HANDLE &hPub, CK_OBJECT_HANDLE &hPriv);
+    void getModulusExponent(const CK_SESSION_HANDLE& hSession,
+                            const CK_OBJECT_HANDLE&  hKey,
+                            std::vector<CK_BYTE>&    modulus,
+                            std::vector<CK_BYTE>&    exponent);
+#ifdef DCAP_SUPPORT
+    void getModulusExponentFromQuote(const CK_MECHANISM_TYPE& mechanismType,
+                                     const CK_SESSION_HANDLE& hSession,
+                                     const CK_OBJECT_HANDLE&  hKey,
+                                     std::vector<CK_BYTE>&    modulus,
+                                     std::vector<CK_BYTE>&    exponent);
+    void computeSHA256Hash(const CK_SESSION_HANDLE& hSession, std::vector<CK_BYTE>& data, std::vector<CK_BYTE>& hashedData);
+#endif
+    void encryptUsingOpenssl(std::vector<CK_BYTE>& aesMasterKey, std::vector<CK_BYTE>& modulus, std::vector<CK_BYTE>& exponent, std::vector<CK_BYTE>& encData);
+    void wrapWithMasterKey(CK_MECHANISM_TYPE     mechanismType,
+                           CK_SESSION_HANDLE     hSession,
+                           CK_OBJECT_HANDLE      hKey,
+                           CK_OBJECT_HANDLE      hKeyData,
+                           std::vector<CK_BYTE>& wrappedData);
 #if 0 // Unsupported by Crypto API Toolkit
 #ifndef WITH_FIPS
 	CK_RV generateDesKey(CK_SESSION_HANDLE hSession, CK_BBOOL bToken, CK_BBOOL bPrivate, CK_OBJECT_HANDLE &hKey);
@@ -107,10 +129,13 @@ protected:
 #if 0 // Unsupported by Crypto API Toolkit
 	void aesWrapUnwrapGeneric(CK_MECHANISM_TYPE mechanismType, CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hKey);
 #endif // Unsupported by Crypto API Toolkit
-    void aesWrapUnwrap(CK_MECHANISM_TYPE mechanismType, 
-                       CK_SESSION_HANDLE hSession, 
-                       CK_OBJECT_HANDLE hKey, 
+    void aesWrapUnwrap(CK_MECHANISM_TYPE mechanismType,
+                       CK_SESSION_HANDLE hSession,
+                       CK_OBJECT_HANDLE hKey,
                        CK_OBJECT_HANDLE hKeyData);
+    void aesWrapUnwrapNegativeTest(CK_SESSION_HANDLE hSession,
+                                   CK_OBJECT_HANDLE  hKey,
+                                   CK_OBJECT_HANDLE  hKeyData);
 	void aesWrapUnwrapRsa(CK_MECHANISM_TYPE mechanismType, CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hKey);
 	CK_RV generateRsaPrivateKey(CK_SESSION_HANDLE hSession, CK_BBOOL bToken, CK_BBOOL bPrivate, CK_OBJECT_HANDLE &hKey);
     void encryptDecryptAfterWrapUnwrap(CK_MECHANISM_TYPE     mechanismType,
@@ -129,7 +154,8 @@ protected:
     CK_RV generateAesKeyTokenObject(CK_SESSION_HANDLE hSession,
                                     CK_BBOOL bToken,
                                     CK_BBOOL bPrivate,
-                                    CK_OBJECT_HANDLE &hKey);
+                                    CK_OBJECT_HANDLE &hKey,
+                                    const char* keyLabel = "aes key used for Encryption/Decryption after wrapping");
     void aesWrapUnwrapTokenObject(CK_MECHANISM_TYPE mechanismType);
     void aesWrapUnwrapInSameSession(CK_MECHANISM_TYPE mechanismType,
                                     CK_SESSION_HANDLE hSession,

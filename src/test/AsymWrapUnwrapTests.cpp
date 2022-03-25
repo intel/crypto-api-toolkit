@@ -69,6 +69,13 @@
 #ifdef DCAP_SUPPORT
 #include "QuoteGeneration.h"
 #endif
+
+#ifdef RSA_OAEP_UNWRAP
+#include <openssl/rsa.h>
+#include <openssl/evp.h>
+#include <openssl/err.h>
+#endif
+
 // CKA_TOKEN
 const CK_BBOOL ON_TOKEN = CK_TRUE;
 const CK_BBOOL IN_SESSION = CK_FALSE;
@@ -104,7 +111,7 @@ CK_RV AsymWrapUnwrapTests::generateAesKey(CK_SESSION_HANDLE hSession, CK_OBJECT_
 CK_RV AsymWrapUnwrapTests::generateRsaKeyPair(CK_SESSION_HANDLE hSession, CK_BBOOL bTokenPuk, CK_BBOOL bPrivatePuk, CK_BBOOL bTokenPrk, CK_BBOOL bPrivatePrk, CK_OBJECT_HANDLE &hPuk, CK_OBJECT_HANDLE &hPrk)
 {
 	CK_MECHANISM mechanism = { CKM_RSA_PKCS_KEY_PAIR_GEN, NULL_PTR, 0 };
-	CK_ULONG bits = 2048;
+	CK_ULONG bits = 3072;
 	CK_BYTE pubExp[] = {0x01, 0x00, 0x01};
 	CK_BYTE subject[] = { 0x12, 0x34 }; // dummy
 	CK_BYTE id[] = { 123 } ; // dummy
@@ -142,7 +149,7 @@ void AsymWrapUnwrapTests::rsaWrapUnwrap(CK_MECHANISM_TYPE mechanismType, CK_SESS
 {
 	CK_MECHANISM mechanism = { mechanismType, NULL_PTR, 0 };
 	CK_RSA_PKCS_OAEP_PARAMS oaepParams = { CKM_SHA_1, CKG_MGF1_SHA1, CKZ_DATA_SPECIFIED, NULL_PTR, 0 };
-	CK_BYTE cipherText[2048];
+	CK_BYTE cipherText[3072];
 	CK_ULONG ulCipherTextLen;
 	CK_BYTE symValue[64];
 	CK_ULONG ulSymValueLen = sizeof(symValue);
@@ -200,7 +207,15 @@ void AsymWrapUnwrapTests::rsaWrapUnwrap(CK_MECHANISM_TYPE mechanismType, CK_SESS
 
 	// Estimate wrapped length
 	rv = CRYPTOKI_F_PTR( C_WrapKey(hSession, &mechanism, hPublicKey, symKey, NULL_PTR, &wrappedLenEstimation) );
-	CPPUNIT_ASSERT(rv==CKR_OK);
+#ifdef DISABLE_TOKEN_KEY_WRAP
+#ifndef SESSION_KEY_WRAP_SUPPORT
+    CPPUNIT_ASSERT(rv == CKR_ACTION_PROHIBITED);
+    return;
+#endif
+#else
+    CPPUNIT_ASSERT(rv == CKR_OK);
+#endif
+
 	CPPUNIT_ASSERT(wrappedLenEstimation>0);
 
 	// This should always fail because wrapped data have to be longer than 0 bytes
@@ -215,8 +230,24 @@ void AsymWrapUnwrapTests::rsaWrapUnwrap(CK_MECHANISM_TYPE mechanismType, CK_SESS
 	// Check length 'estimation'
 	CPPUNIT_ASSERT(wrappedLenEstimation>=ulCipherTextLen);
 
-	rv = CRYPTOKI_F_PTR( C_UnwrapKey(hSession, &mechanism, hPrivateKey, cipherText, ulCipherTextLen, unwrapTemplate, sizeof(unwrapTemplate)/sizeof(CK_ATTRIBUTE), &unwrappedKey) );
-	CPPUNIT_ASSERT(rv==CKR_OK);
+    CK_RSA_PKCS_PSS_PARAMS mechParams = {CKM_SHA384, CKG_MGF1_SHA384, 0};
+    CK_MECHANISM_TYPE signVerifyMech  = CKM_SHA384_RSA_PKCS_PSS;
+    void *params = &mechParams;
+    size_t paramsLen = sizeof(CK_RSA_PKCS_PSS_PARAMS);
+
+    std::vector<CK_BYTE> wrappedKey, encData(cipherText, cipherText+ulCipherTextLen);
+#ifdef DISABLE_TOKEN_KEY_WRAP
+    wrappedKey.resize(ulCipherTextLen);
+    memcpy(wrappedKey.data(), encData.data(), ulCipherTextLen);
+#else
+    CK_MECHANISM mech;
+    mech.mechanism = signVerifyMech;
+    mech.pParameter = params;
+    mech.ulParameterLen = paramsLen;
+    unwrapKeyHelper.getUnwrapParams(mech, encData, wrappedKey);
+#endif
+	rv = CRYPTOKI_F_PTR( C_UnwrapKey(hSession, &mechanism, hPrivateKey, wrappedKey.data(), wrappedKey.size(), unwrapTemplate, sizeof(unwrapTemplate)/sizeof(CK_ATTRIBUTE), &unwrappedKey) );
+    CPPUNIT_ASSERT(rv==CKR_OK);
 
 #ifdef SGXHSM
     //Encryption with the key used for wrappping
@@ -461,7 +492,13 @@ bool AsymWrapUnwrapTests::customQuoteEcdsaSingleUse(const CK_MECHANISM_TYPE& quo
                                       NULL_PTR,
                                       &wrappedLen));
 
+#ifdef DISABLE_TOKEN_KEY_WRAP
+#ifndef SESSION_KEY_WRAP_SUPPORT
+        CPPUNIT_ASSERT(CKR_ACTION_PROHIBITED == rv);
+#endif
+#else
         CPPUNIT_ASSERT(CKR_OK == rv);
+#endif
         wrappedData.resize(wrappedLen);
 
         rv = CRYPTOKI_F_PTR(C_WrapKey(hSession,
@@ -470,7 +507,13 @@ bool AsymWrapUnwrapTests::customQuoteEcdsaSingleUse(const CK_MECHANISM_TYPE& quo
                                       symKey,
                                       wrappedData.data(),
                                       &wrappedLen));
+#ifdef DISABLE_TOKEN_KEY_WRAP
+#ifndef SESSION_KEY_WRAP_SUPPORT
+        CPPUNIT_ASSERT(CKR_ACTION_PROHIBITED == rv);
+#endif
+#else
         CPPUNIT_ASSERT(CKR_OK == rv);
+#endif
 
         // Generate quote
         pQuoteMechanism->pParameter = &quoteParams;
@@ -512,7 +555,13 @@ bool AsymWrapUnwrapTests::customQuoteEcdsaSingleUse(const CK_MECHANISM_TYPE& quo
                                       symKey,
                                       NULL_PTR,
                                       &wrappedLen));
+#ifdef DISABLE_TOKEN_KEY_WRAP
+#ifndef SESSION_KEY_WRAP_SUPPORT
+        CPPUNIT_ASSERT(CKR_ACTION_PROHIBITED == rv);
+#endif
+#else
         CPPUNIT_ASSERT (CKR_WRAPPING_KEY_HANDLE_INVALID == rv);
+#endif
 
         // Quote generation should fail
         rv = CRYPTOKI_F_PTR(C_WrapKey(hSession,
@@ -535,32 +584,53 @@ bool AsymWrapUnwrapTests::customQuoteEcdsaSingleUse(const CK_MECHANISM_TYPE& quo
                                          hPublicKey));
         CPPUNIT_ASSERT (CKR_OBJECT_HANDLE_INVALID == rv);
 
+        std::vector<CK_BYTE> wrappedKey;
+#ifdef DISABLE_TOKEN_KEY_WRAP
+        wrappedKey.resize(wrappedData.size());
+        memcpy(wrappedKey.data(), wrappedData.data(), wrappedData.size());
+#else
+        CK_RSA_PKCS_PSS_PARAMS mechParams = {CKM_SHA384, CKG_MGF1_SHA384, 0};
+        CK_MECHANISM_TYPE signVerifyMech  = CKM_SHA384_RSA_PKCS_PSS;
+        void *params = &mechParams;
+        size_t paramsLen = sizeof(CK_RSA_PKCS_PSS_PARAMS);
+
+        CK_MECHANISM mech;
+        mech.mechanism = signVerifyMech;
+        mech.pParameter = params;
+        mech.ulParameterLen = paramsLen;
+        unwrapKeyHelper.getUnwrapParams(mech, wrappedData, wrappedKey);
+#endif
+
         // 1 st unwrap operation allowed
         rv = CRYPTOKI_F_PTR( C_UnwrapKey(hSession,
                                          &mechanism,
                                          hPrivateKey,
-                                         wrappedData.data(),
-                                         wrappedLen,
+                                         wrappedKey.data(),
+                                         wrappedKey.size(),
                                          unwrapTemplate,
                                          sizeof(unwrapTemplate)/sizeof(CK_ATTRIBUTE),
                                          &unwrappedKey) );
+
+#if defined DISABLE_TOKEN_KEY_WRAP && !defined SESSION_KEY_WRAP_SUPPORT
+        CPPUNIT_ASSERT(CKR_ARGUMENTS_BAD == rv);
+#else
         CPPUNIT_ASSERT(CKR_OK == rv);
+#endif
 
         unwrappedKey = CK_INVALID_HANDLE;
         rv = CRYPTOKI_F_PTR( C_UnwrapKey(hSession,
                                          &mechanism,
                                          hPrivateKey,
-                                         wrappedData.data(),
-                                         wrappedLen,
+                                         wrappedKey.data(),
+                                         wrappedKey.size(),
                                          unwrapTemplate,
                                          sizeof(unwrapTemplate)/sizeof(CK_ATTRIBUTE),
                                          &unwrappedKey) );
-#ifdef EPHEMERAL_QUOTE
+#if defined DISABLE_TOKEN_KEY_WRAP && !defined SESSION_KEY_WRAP_SUPPORT
+        CPPUNIT_ASSERT(CKR_ARGUMENTS_BAD == rv);
+#else
         // 2 nd unwrap operation should fail as key is destroyed
         CPPUNIT_ASSERT(CKR_UNWRAPPING_KEY_HANDLE_INVALID == rv);
-#else
-        // 2 nd unwrap operation should pass as key is not destroyed
-        CPPUNIT_ASSERT(CKR_OK == rv);
 #endif
 
         // As key is deleted
@@ -583,7 +653,13 @@ bool AsymWrapUnwrapTests::customQuoteEcdsaSingleUse(const CK_MECHANISM_TYPE& quo
                                       symKey,
                                       NULL_PTR,
                                       &wrappedLen));
+#ifdef DISABLE_TOKEN_KEY_WRAP
+#ifndef SESSION_KEY_WRAP_SUPPORT
+        CPPUNIT_ASSERT(CKR_ACTION_PROHIBITED == rv);
+#endif
+#else
         CPPUNIT_ASSERT (CKR_WRAPPING_KEY_HANDLE_INVALID == rv);
+#endif
 
         // Quote generation should fail
         rv = CRYPTOKI_F_PTR(C_WrapKey(hSession,
@@ -643,7 +719,7 @@ void AsymWrapUnwrapTests::testQuoteGeneration()
     CK_BBOOL        bTrue = CK_TRUE;
     CK_BBOOL        bFalse = CK_FALSE;
 
-    CK_ULONG modulusBits = 2048;
+    CK_ULONG modulusBits = 3072;
 
     CK_ATTRIBUTE asymKeyAttribs[] = {{ CKA_TOKEN,           &bFalse,            sizeof(bFalse) },
                                      { CKA_ENCRYPT,         &bTrue,             sizeof(bTrue) },
@@ -702,18 +778,20 @@ void AsymWrapUnwrapTests::testQuoteGeneration()
     // The key used for quote generation for single use
     result = customQuoteEcdsaSingleUse(mechanismType, hSession, hAsymKey, hAsymPrivateKey);
     CPPUNIT_ASSERT(true == result);
+#ifdef DISABLE_TOKEN_KEY_WRAP
+#ifndef SESSION_KEY_WRAP_SUPPORT
     rv = C_DestroyObject(hSession, hAsymKey);
-#ifdef EPHEMERAL_QUOTE
-    CPPUNIT_ASSERT(CKR_OBJECT_HANDLE_INVALID == rv);
-#else
     CPPUNIT_ASSERT(CKR_OK == rv);
-#endif
 
     rv = C_DestroyObject(hSession, hAsymPrivateKey);
-#ifdef EPHEMERAL_QUOTE
-    CPPUNIT_ASSERT(CKR_OBJECT_HANDLE_INVALID == rv);
-#else
     CPPUNIT_ASSERT(CKR_OK == rv);
+#endif
+#else
+    rv = C_DestroyObject(hSession, hAsymKey);
+    CPPUNIT_ASSERT(CKR_OBJECT_HANDLE_INVALID == rv);
+
+    rv = C_DestroyObject(hSession, hAsymPrivateKey);
+    CPPUNIT_ASSERT(CKR_OBJECT_HANDLE_INVALID == rv);
 #endif
 
     // The key used for quote generation has to be a session key
@@ -774,7 +852,7 @@ bool AsymWrapUnwrapTests::computeSHA256Hash(const CK_SESSION_HANDLE& hSession,
 CK_RV AsymWrapUnwrapTests::generateRsaKeyPairTokenObject(CK_SESSION_HANDLE hSession, CK_BBOOL bTokenPuk, CK_BBOOL bPrivatePuk, CK_BBOOL bTokenPrk, CK_BBOOL bPrivatePrk, CK_OBJECT_HANDLE &hPuk, CK_OBJECT_HANDLE &hPrk)
 {
     CK_MECHANISM mechanism = { CKM_RSA_PKCS_KEY_PAIR_GEN, NULL_PTR, 0 };
-    CK_ULONG bits = 2048;
+    CK_ULONG bits = 3072;
     CK_BYTE pubExp[] = {0x01, 0x00, 0x01};
     CK_BYTE subject[] = { 0x12, 0x34 }; // dummy
     CK_BYTE id[] = { 123 } ; // dummy
@@ -838,7 +916,6 @@ void AsymWrapUnwrapTests::testRsaWrapUnwrapTokenObject()
     CPPUNIT_ASSERT(rv==CKR_OK);
 
     rsaWrapUnwrapTokenObject(CKM_RSA_PKCS,hSessionRW,hPublicKey,hPrivateKey);
-
 
     rv = CRYPTOKI_F_PTR( C_Logout(hSessionRW) );
     CPPUNIT_ASSERT(rv==CKR_OK);
@@ -922,7 +999,7 @@ void AsymWrapUnwrapTests::rsaWrapUnwrapTokenObject(CK_MECHANISM_TYPE mechanismTy
 {
     CK_MECHANISM mechanism = { mechanismType, NULL_PTR, 0 };
     CK_RSA_PKCS_OAEP_PARAMS oaepParams = { CKM_SHA_1, CKG_MGF1_SHA1, CKZ_DATA_SPECIFIED, NULL_PTR, 0 };
-    CK_BYTE cipherText[2048];
+    CK_BYTE cipherText[3072];
     CK_ULONG ulCipherTextLen;
     CK_BYTE symValue[64];
     CK_OBJECT_HANDLE symKey = CK_INVALID_HANDLE;
@@ -982,7 +1059,19 @@ void AsymWrapUnwrapTests::rsaWrapUnwrapTokenObject(CK_MECHANISM_TYPE mechanismTy
     // Check length 'estimation'
     CPPUNIT_ASSERT(wrappedLenEstimation>=ulCipherTextLen);
 
-    rv = CRYPTOKI_F_PTR( C_UnwrapKey(hSession, &mechanism, hPrivateKey, cipherText, ulCipherTextLen, unwrapTemplate, sizeof(unwrapTemplate)/sizeof(CK_ATTRIBUTE), &unwrappedKey) );
+    CK_RSA_PKCS_PSS_PARAMS mechParams = {CKM_SHA384, CKG_MGF1_SHA384, 0};
+    CK_MECHANISM_TYPE signVerifyMech  = CKM_SHA384_RSA_PKCS_PSS;
+    void *params = &mechParams;
+    size_t paramsLen = sizeof(CK_RSA_PKCS_PSS_PARAMS);
+
+    std::vector<CK_BYTE> wrappedKey, encData(cipherText, cipherText+ulCipherTextLen);
+    CK_MECHANISM mech;
+    mech.mechanism = signVerifyMech;
+    mech.pParameter = params;
+    mech.ulParameterLen = paramsLen;
+    unwrapKeyHelper.getUnwrapParams(mech, encData, wrappedKey);
+
+    rv = CRYPTOKI_F_PTR( C_UnwrapKey(hSession, &mechanism, hPrivateKey, wrappedKey.data(), wrappedKey.size(), unwrapTemplate, sizeof(unwrapTemplate)/sizeof(CK_ATTRIBUTE), &unwrappedKey) );
     CPPUNIT_ASSERT(rv==CKR_OK);
 
     //Encryption with public key used for wrappping
@@ -996,4 +1085,144 @@ void AsymWrapUnwrapTests::rsaWrapUnwrapTokenObject(CK_MECHANISM_TYPE mechanismTy
     rv = CRYPTOKI_F_PTR(C_DestroyObject(hSession, symKey));
     CPPUNIT_ASSERT(rv==CKR_OK);
 }
+
+#ifdef RSA_OAEP_UNWRAP
+void AsymWrapUnwrapTests::testRsaOAEPUnwrap()
+{
+    CK_RV rv;
+    CK_SESSION_HANDLE hSession;
+
+    // Just make sure that we finalize any previous tests
+    CRYPTOKI_F_PTR( C_Finalize(NULL_PTR) );
+
+    // Initialize the library and start the test.
+    rv = CRYPTOKI_F_PTR( C_Initialize(NULL_PTR) );
+    CPPUNIT_ASSERT(rv == CKR_OK);
+
+    // Open read-only session
+    rv = CRYPTOKI_F_PTR( C_OpenSession(m_initializedTokenSlotID, CKF_SERIAL_SESSION, NULL_PTR, NULL_PTR, &hSession) );
+    CPPUNIT_ASSERT(rv == CKR_OK);
+
+    // Login USER into the sessions so we can create a private objects
+    rv = CRYPTOKI_F_PTR( C_Login(hSession,CKU_USER,m_userPin1,m_userPin1Length) );
+    CPPUNIT_ASSERT(rv==CKR_OK);
+    for (int i=0; i<3; i++)
+    {
+        CK_OBJECT_HANDLE hPublicKey = CK_INVALID_HANDLE;
+        CK_OBJECT_HANDLE hPrivateKey = CK_INVALID_HANDLE;
+
+        // Generate all combinations of session/token public/private key pairs.
+        rv = generateRsaKeyPair(hSession, IN_SESSION, IS_PUBLIC, IN_SESSION, IS_PUBLIC, hPublicKey, hPrivateKey);
+        CPPUNIT_ASSERT(rv == CKR_OK);
+
+        CK_ATTRIBUTE attribs[] = {
+            { CKA_MODULUS, nullptr, 0 },
+            { CKA_PUBLIC_EXPONENT, nullptr, 0 }
+        };
+
+        rv = CRYPTOKI_F_PTR( C_GetAttributeValue(hSession, hPublicKey, &attribs[0], 2) );
+        CPPUNIT_ASSERT(CKR_OK == rv);
+
+        attribs[0].pValue = (CK_VOID_PTR)malloc(attribs[0].ulValueLen);
+        attribs[1].pValue = (CK_VOID_PTR)malloc(attribs[1].ulValueLen);
+
+        rv = CRYPTOKI_F_PTR( C_GetAttributeValue(hSession, hPublicKey, &attribs[0], 2));
+        CPPUNIT_ASSERT(CKR_OK == rv);
+
+        ERR_load_BIO_strings();
+
+        RSA* rsa = RSA_new();
+        CPPUNIT_ASSERT(rsa);
+
+        RSA_set_method(rsa, RSA_PKCS1_OpenSSL());
+
+        BIGNUM *n = NULL;
+        BIGNUM *e = NULL;
+        n = BN_bin2bn((CK_BYTE_PTR)attribs[0].pValue, attribs[0].ulValueLen, NULL);
+        CPPUNIT_ASSERT(n);
+
+        e = BN_bin2bn((CK_BYTE_PTR)attribs[1].pValue, attribs[1].ulValueLen, NULL);
+        CPPUNIT_ASSERT(e);
+
+        BIGNUM *d;
+        int ret = RSA_set0_key(rsa, n, e, NULL);
+        CPPUNIT_ASSERT(ret);
+
+        std::vector<uint8_t> aesKeyData(32, 1);
+
+        EVP_PKEY* pk = EVP_PKEY_new();
+        CPPUNIT_ASSERT(pk);
+        CPPUNIT_ASSERT( EVP_PKEY_assign_RSA(pk, rsa) > 0);
+
+        CK_MECHANISM mechanism = { CKM_RSA_PKCS_OAEP, nullptr, 0 };
+        CK_RSA_PKCS_OAEP_PARAMS oaepParams = { CKM_SHA_1, CKG_MGF1_SHA1, CKZ_DATA_SPECIFIED, nullptr, 0 };
+        mechanism.pParameter = &oaepParams;
+        mechanism.ulParameterLen = sizeof(oaepParams);
+        CK_MECHANISM_TYPE hashAlgos[3] = { CKM_SHA_1, CKM_SHA256, CKM_SHA384};
+        CK_RSA_PKCS_MGF_TYPE mgfs[3] = { CKG_MGF1_SHA1, CKG_MGF1_SHA256, CKG_MGF1_SHA384};
+
+        const EVP_MD* mds[3] = { EVP_sha1(), EVP_sha256(), EVP_sha384()};
+        const EVP_MD *md;
+        unsigned char *out;
+        size_t outlen;
+
+        oaepParams.hashAlg = hashAlgos[i];
+        oaepParams.mgf = mgfs[i];
+        EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new(pk, nullptr);
+        CPPUNIT_ASSERT(ctx);
+        CPPUNIT_ASSERT(EVP_PKEY_encrypt_init(ctx) > 0);
+
+        CPPUNIT_ASSERT(EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) > 0);
+        CPPUNIT_ASSERT(EVP_PKEY_CTX_set_rsa_oaep_md(ctx, mds[i]) > 0);
+        CPPUNIT_ASSERT(EVP_PKEY_CTX_set_rsa_mgf1_md(ctx, mds[i]) > 0);
+        CPPUNIT_ASSERT(EVP_PKEY_encrypt(ctx, NULL, &outlen, &aesKeyData[0], 32) > 0);
+        out = (unsigned char*)OPENSSL_malloc(outlen);
+        CPPUNIT_ASSERT(out);
+        CPPUNIT_ASSERT(EVP_PKEY_encrypt(ctx, out, &outlen, &aesKeyData[0], 32) > 0);
+
+        std::vector<CK_BYTE> wrappedKey, wrappedData(out, out+outlen);
+#ifdef DISABLE_TOKEN_KEY_WRAP
+        wrappedKey.resize(wrappedData.size());
+        memcpy(wrappedKey.data(), wrappedData.data(), wrappedData.size());
+#else
+        CK_RSA_PKCS_PSS_PARAMS mechParams = {CKM_SHA384, CKG_MGF1_SHA384, 0};
+        CK_MECHANISM_TYPE signVerifyMech  = CKM_SHA384_RSA_PKCS_PSS;
+        void *params = &mechParams;
+        size_t paramsLen = sizeof(CK_RSA_PKCS_PSS_PARAMS);
+
+        CK_MECHANISM mech;
+        mech.mechanism = signVerifyMech;
+        mech.pParameter = params;
+        mech.ulParameterLen = paramsLen;
+        unwrapKeyHelper.getUnwrapParams(mech, wrappedData, wrappedKey);
+#endif
+
+        CK_BBOOL bFalse = CK_FALSE;
+        CK_BBOOL bTrue = CK_TRUE;
+        CK_OBJECT_CLASS keyClass = CKO_SECRET_KEY;
+        CK_KEY_TYPE keyType = CKK_AES;
+        CK_ATTRIBUTE unwrapTemplate[] = {
+            { CKA_CLASS, &keyClass, sizeof(keyClass) },
+            { CKA_KEY_TYPE, &keyType, sizeof(keyType) },
+            { CKA_TOKEN, &bFalse, sizeof(bFalse) },
+            { CKA_SENSITIVE, &bFalse, sizeof(bFalse) },
+            { CKA_EXTRACTABLE, &bTrue, sizeof(bTrue) },
+            { CKA_WRAP, &bTrue, sizeof(bTrue) },
+            { CKA_UNWRAP, &bTrue, sizeof(bTrue) },
+        };
+
+        CK_OBJECT_HANDLE unwrappedKey = CKR_OBJECT_HANDLE_INVALID;
+        rv = CRYPTOKI_F_PTR(C_UnwrapKey(hSession,
+                                        &mechanism,
+                                        hPrivateKey,
+                                        wrappedKey.data(),
+                                        wrappedKey.size(),
+                                        unwrapTemplate,
+                                        sizeof(unwrapTemplate)/sizeof(CK_ATTRIBUTE),
+                                        &unwrappedKey));
+        CPPUNIT_ASSERT(CKR_OK == rv);
+        RSA_free(rsa);
+    }
+}
+#endif
 #endif

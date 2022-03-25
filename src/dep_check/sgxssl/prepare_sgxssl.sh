@@ -61,31 +61,19 @@
 
 top_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 sgxssl_dir=$top_dir/sgxssl
+sgxssl_commit=17531f346ca144b96e9d16b607ec612877465b47
 openssl_out_dir=$sgxssl_dir/openssl_source
-openssl_ver_name=openssl-1.1.1k
-sgxssl_github_archive=https://github.com/01org/intel-sgx-ssl/archive
-sgxssl_file_name=lin_2.14_1.1.1k
+openssl_ver_name=openssl-1.1.1n
 build_script=$sgxssl_dir/Linux/build_openssl.sh
 server_url_path=https://www.openssl.org/source/
 full_openssl_url=$server_url_path/$openssl_ver_name.tar.gz
 full_openssl_url_old=$server_url_path/old/1.1.1/$openssl_ver_name.tar.gz
 
-sgxssl_chksum=825e58823f2ec39bcfb69c2c62cc4e769bdac057ade10b362cdeac1f5a563954
-openssl_chksum=892a0875b9872acd04a9fde79b1f943075d5ea162415de3047c327df33fbaee5
-rm -f check_sum_sgxssl.txt check_sum_openssl.txt
+openssl_chksum=40dceb51a4f6a5275bde0e6bf20ef4b91bfc32ed57c0552e2e8e15463372b17a
+rm -f check_sum_openssl.txt
 if [ ! -f $build_script ]; then
-	wget $sgxssl_github_archive/$sgxssl_file_name.zip -P $sgxssl_dir/ || exit 1
-	sha256sum $sgxssl_dir/$sgxssl_file_name.zip > $sgxssl_dir/check_sum_sgxssl.txt
-	grep $sgxssl_chksum $sgxssl_dir/check_sum_sgxssl.txt
-	if [ $? -ne 0 ]; then
-		echo "File $sgxssl_dir/$sgxssl_file_name.zip checksum failure"
-      rm -f $sgxssl_dir/$sgxssl_file_name.zip
-		exit -1
-	fi
-	unzip -qq $sgxssl_dir/$sgxssl_file_name.zip -d $sgxssl_dir/ || exit 1
-	mv $sgxssl_dir/intel-sgx-ssl-$sgxssl_file_name/* $sgxssl_dir/ || exit 1
-	rm $sgxssl_dir/$sgxssl_file_name.zip || exit 1
-	rm -rf $sgxssl_dir/intel-sgx-ssl-$sgxssl_file_name || exit 1
+	git clone https://github.com/intel/intel-sgx-ssl.git $sgxssl_dir || exit 1
+	git -C $sgxssl_dir checkout  $sgxssl_commit || exit 1
 fi
 
 if [ ! -f $openssl_out_dir/$openssl_ver_name.tar.gz ]; then

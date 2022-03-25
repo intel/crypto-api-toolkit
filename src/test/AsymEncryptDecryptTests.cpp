@@ -404,11 +404,28 @@ CK_RV AsymEncryptDecryptTests::rsaWrapUnwrapWithAes(const CK_SESSION_HANDLE& hSe
                                             { CKA_ID,       &id[0],              sizeof(id) }
                                             };
 
+    CK_RSA_PKCS_PSS_PARAMS mechParams = {CKM_SHA384, CKG_MGF1_SHA384, 0};
+    CK_MECHANISM_TYPE signVerifyMech  = CKM_SHA384_RSA_PKCS_PSS;
+    void *params = &mechParams;
+    size_t paramsLen = sizeof(CK_RSA_PKCS_PSS_PARAMS);
+
+    std::vector<CK_BYTE> totalWrappedKey;
+#ifdef DISABLE_TOKEN_KEY_WRAP
+    totalWrappedKey.resize(wrappedKey.size());
+    memcpy(totalWrappedKey.data(), wrappedKey.data(), wrappedKey.size());
+#else
+    CK_MECHANISM mech;
+    mech.mechanism = signVerifyMech;
+    mech.pParameter = params;
+    mech.ulParameterLen = paramsLen;
+    getUnwrapParams(mech, wrappedKey, totalWrappedKey);
+#endif
+
     rv = CRYPTOKI_F_PTR( C_UnwrapKey(hSession,
                                      pMechanism,
                                      hKey,
-                                     wrappedKey.data(),
-                                     wrappedKey.size(),
+                                     totalWrappedKey.data(),
+                                     totalWrappedKey.size(),
                                      asymPrivateKeyAttribs,
                                      sizeof(asymPrivateKeyAttribs) / sizeof(CK_ATTRIBUTE),
                                      &importedKey));

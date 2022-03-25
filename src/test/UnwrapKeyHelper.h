@@ -56,38 +56,32 @@
  */
 
 /*****************************************************************************
- AsymEncryptDecryptTests.h
+ UnwrapKeyHelper.h
 
- Contains test cases for C_EncryptInit, C_Encrypt, C_DecryptInit, C_Decrypt
- using asymmetrical algorithms (i.e., RSA)
  *****************************************************************************/
 
-#ifndef _SOFTHSM_V2_ASYMENCRYPTDECRYPTTESTS_H
-#define _SOFTHSM_V2_ASYMENCRYPTDECRYPTTESTS_H
+#ifndef _SOFTHSM_V2_UNWRAPKEYHELPER_H
+#define _SOFTHSM_V2_UNWRAPKEYHELPER_H
 
 #include "TestsBase.h"
-#include "UnwrapKeyHelper.h"
 #include <cppunit/extensions/HelperMacros.h>
 
-class AsymEncryptDecryptTests : public TestsBase
+#include <openssl/rsa.h>
+#include <openssl/evp.h>
+#include <openssl/x509.h>
+#include <openssl/bio.h>
+#include <openssl/err.h>
+#include <openssl/pem.h>
+
+class UnwrapKeyHelper : public TestsBase
 {
-	CPPUNIT_TEST_SUITE(AsymEncryptDecryptTests);
-	CPPUNIT_TEST(testRsaEncryptDecrypt);
-	CPPUNIT_TEST_SUITE_END();
-
 public:
-	void testRsaEncryptDecrypt();
-    void testNullTemplate();
-
-protected:
-    UnwrapKeyHelper unwrapKeyHelper;
-	CK_RV generateRsaKeyPair(CK_SESSION_HANDLE hSession, CK_BBOOL bTokenPuk, CK_BBOOL bPrivatePuk, CK_BBOOL bTokenPrk, CK_BBOOL bPrivatePrk, CK_OBJECT_HANDLE &hPuk, CK_OBJECT_HANDLE &hPrk);
-	void rsaEncryptDecrypt(CK_MECHANISM_TYPE mechanismType, CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hPublicKey, CK_OBJECT_HANDLE hPrivateKey);
-	void rsaOAEPParams(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hPublicKey);
-
-#ifdef AES_UNWRAP_RSA
-    CK_RV rsaWrapUnwrapWithAes(const CK_SESSION_HANDLE& hSession);
-#endif
+	std::vector<CK_BYTE> getDigest(std::vector<CK_BYTE>& data);
+    void getUnwrapParams(CK_MECHANISM&         mech,
+                         std::vector<CK_BYTE>& encData,
+                         std::vector<CK_BYTE>& wrappedKey,
+                         bool                  useLocalPublicKey  = false,
+                         bool                  useLocalPrivateKey = false);
 };
 
-#endif // !_SOFTHSM_V2_ASYMENCRYPTDECRYPTTESTS_H
+#endif // !_SOFTHSM_V2_UNWRAPKEYHELPER_H

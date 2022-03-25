@@ -90,6 +90,7 @@
 #include "QuoteGeneration.h"
 #endif
 #include "QuoteGenerationDefs.h"
+#include "libp11sgx.h"
 #include <memory>
 
 /* limiting the maximum for attribute template count */
@@ -560,7 +561,8 @@ private:
 		ByteString &wrapped,
 		Token* token,
 		OSObject *unwrapKey,
-		ByteString &keydata
+		ByteString &keydata,
+        const CK_MECHANISM_TYPE hashAlgo = CKM_SHA_1
 	);
 
 	CK_RV UnwrapKeySym
@@ -572,7 +574,7 @@ private:
 		ByteString &keydata
 	);
 
-	CK_RV MechParamCheckRSAPKCSOAEP(CK_MECHANISM_PTR pMechanism);
+    CK_RV MechParamCheckRSAPKCSOAEP(CK_MECHANISM_PTR pMechanism, const CK_BBOOL fromUnwrapKey = CK_FALSE);
 
 	static bool isMechanismPermitted(OSObject* key, CK_MECHANISM_PTR pMechanism);
 	static void prepareSupportedMechanisms(std::map<std::string, CK_MECHANISM_TYPE> &t);

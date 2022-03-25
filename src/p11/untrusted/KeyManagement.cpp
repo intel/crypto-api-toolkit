@@ -38,7 +38,7 @@
 #endif
 
 #include <cstring>
-#include <stdio.h>
+#include <cstdio>
 
 //---------------------------------------------------------------------------------------------
 CK_RV generateKey(CK_SESSION_HANDLE    hSession,

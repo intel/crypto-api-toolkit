@@ -66,6 +66,7 @@
 #define _SOFTHSM_V2_ASYMWRAPUNWRAPTESTS_H
 
 #include "TestsBase.h"
+#include "UnwrapKeyHelper.h"
 #include <cppunit/extensions/HelperMacros.h>
 
 class AsymWrapUnwrapTests : public TestsBase
@@ -73,7 +74,9 @@ class AsymWrapUnwrapTests : public TestsBase
 	CPPUNIT_TEST_SUITE(AsymWrapUnwrapTests);
 	CPPUNIT_TEST(testRsaWrapUnwrap);
 #ifdef SGXHSM
-    CPPUNIT_TEST(testRsaWrapUnwrapTokenObject);
+#ifdef RSA_OAEP_UNWRAP
+    CPPUNIT_TEST(testRsaOAEPUnwrap);
+#endif
 #endif
 #ifdef DCAP_SUPPORT
     // When this test executes, please make sure the DCAP Quote Provider and
@@ -90,9 +93,24 @@ public:
 #endif
 #ifdef SGXHSM
     void testRsaWrapUnwrapTokenObject();
+    /*
+        testRsaOAEPUnwrap tests SKC's flow of C_UnwrapKey with CKM_RSA_PKCS_OAEP mechanism with
+        different hash algorithms. Currently CKM_SHA_1, CKM_SHA256 and CKM_SHA384 are supported.
+
+        NOTE: OPENSSL NEEDS TO BE INSTALLED TO RUN THIS TEST.
+
+        Enable RSA_OAEP_UNWRAP in configure.ac using the below two lines.
+
+        AM_CONDITIONAL(RSA_OAEP_UNWRAP, true)
+        AC_DEFINE([RSA_OAEP_UNWRAP], [], [RSA OAEP UNWRAP])
+    */
+#ifdef RSA_OAEP_UNWRAP
+    void testRsaOAEPUnwrap();
+#endif
 #endif
 
 protected:
+    UnwrapKeyHelper unwrapKeyHelper;
 	CK_RV generateAesKey(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE &hKey);
 	CK_RV generateRsaKeyPair(CK_SESSION_HANDLE hSession, CK_BBOOL bTokenPuk, CK_BBOOL bPrivatePuk, CK_BBOOL bTokenPrk, CK_BBOOL bPrivatePrk, CK_OBJECT_HANDLE &hPuk, CK_OBJECT_HANDLE &hPrk);
 #ifdef SGXHSM

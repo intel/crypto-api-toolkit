@@ -194,12 +194,12 @@ bool AsymmetricAlgorithm::wrapKey(PublicKey* publicKey, const ByteString& data, 
 	return encrypt(publicKey, data, encryptedData, padding);
 }
 
-bool AsymmetricAlgorithm::unwrapKey(PrivateKey* privateKey, const ByteString& encryptedData, ByteString& data, const AsymMech::Type padding)
+bool AsymmetricAlgorithm::unwrapKey(PrivateKey* privateKey, const ByteString& encryptedData, ByteString& data, const AsymMech::Type padding, const CK_MECHANISM_TYPE hashAlgo)
 {
 	if (!isWrappingMech(padding))
 		return false;
 
-	return decrypt(privateKey, encryptedData, data, padding);
+	return decrypt(privateKey, encryptedData, data, padding, hashAlgo);
 }
 
 

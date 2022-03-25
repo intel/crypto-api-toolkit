@@ -179,7 +179,8 @@ uninstall-local:
     rm -f $(prefix)/include/pkcs11.h                \
     rm -f $(prefix)/include/pkcs11f.h               \
     rm -f $(prefix)/include/QuoteGeneration.h       \
-    rm -f $(prefix)/include/QuoteGenerationDefs.h
+    rm -f $(prefix)/include/QuoteGenerationDefs.h   \
+    rm -f $(prefix)/include/libp11sgx.h
 
 clean-local:
 	test -z *.la || rm -rf *.la
