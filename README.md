@@ -59,7 +59,7 @@ The common software requirements for building the CTK are listed below. Please r
 
 - Intel(R) SGX software components  
   -  The SDK, driver and PSW can be downloaded and installed from <a href=https://download.01.org/intel-sgx/latest/linux-latest/distro>Intel SGX Linux 2.19.100.3</a> or can be built from the source from https://github.com/intel/linux-sgx. In-kernel versions of the SGX driver can also be used (from Linux kernel versions 5.11).
-  - Intel(R) SGX SSL - The current release of CTK automatically builds and installs Intel(R) SGX SSL with OpenSSL version 1.1.1t if not installed already. Alternatively, it can be built from the source and installed from https://github.com/intel/intel-sgx-ssl. CTK has been validated with Intel(R) SGX SSL built with OpenSSL version 1.1.1t without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
+  - Intel(R) SGX SSL can be built and installed from the source (https://github.com/intel/intel-sgx-ssl). CTK has been validated with Intel(R) SGX SSL built with OpenSSL version 1.1.1t without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
   - (For DCAP support) The latest version of DCAP binaries and driver can be downloaded and installed from https://download.01.org/intel-sgx/ or built from the source from https://github.com/intel/SGXDataCenterAttestationPrimitives.
 
 > **NOTE** This version of CTK is configured to build with, and validated against Intel SGX SDK v2.19.100.3 and SGX in-kernel driver part of Linux kernel v5.18, and SGXSSL binaries without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
