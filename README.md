@@ -1,4 +1,4 @@
-Crypto API Toolkit for Intel(R) SGX
+erypto API Toolkit for Intel(R) SGX
 ==================================
 
 - [Introduction](#introduction)
@@ -39,7 +39,7 @@ See [LICENSE.md](LICENSE.md) for details.
 ## Prerequisites
 
 ### System requirements
-Intel(R) SGX capable system running Ubuntu 20.04-LTS or Ubuntu 22.04 64-bit. For using Data Center Attestation Primitives (DCAP), the system must support Flexible Launch Control (FLC).
+Intel(R) SGX capable system running Ubuntu 22.04-LTS 64-bit. For using Data Center Attestation Primitives (DCAP), the system must support Flexible Launch Control (FLC).
 
 Please check <a href="https://ark.intel.com/content/www/us/en/ark/search/featurefilter.html?productType=873&2_SoftwareGuardExtensions=Yes%20with%20both%20Intel%C2%AE%20SPS%20and%20Intel%C2%AE%20ME">this page</a> for the server platforms that support Intel(R) SGX.
 
@@ -58,11 +58,11 @@ The common software requirements for building the CTK are listed below. Please r
   ``$ sudo apt-get install dkms libprotobuf10 autoconf libcppunit-dev autotools-dev libc6-dev libtool build-essential``
 
 - Intel(R) SGX software components  
-  -  The SDK, driver and PSW can be downloaded and installed from <a href=https://download.01.org/intel-sgx/latest/linux-latest/distro>Intel SGX Linux 2.19.100.3</a> or can be built from the source from https://github.com/intel/linux-sgx. In-kernel versions of the SGX driver can also be used (from Linux kernel versions 5.11).
-  - Intel(R) SGX SSL can be built and installed from the source (https://github.com/intel/intel-sgx-ssl). CTK has been validated with Intel(R) SGX SSL built with OpenSSL version 1.1.1t without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
+  -  The SDK, driver and PSW can be downloaded and installed from <a href=https://download.01.org/intel-sgx/latest/linux-latest/distro/ubuntu22.04-server/>Intel SGX Linux 2.21.100.1</a> or can be built from the source from https://github.com/intel/linux-sgx. In-kernel versions of the SGX driver can also be used (from Linux kernel versions 5.11).
+  - Intel(R) SGX SSL can be built and installed from the source (https://github.com/intel/intel-sgx-ssl/tree/3.0_Rev1). CTK has been validated with Intel(R) SGX SSL (Release 3.0_Rev1) built with OpenSSL version 3.0.10 without mitigation.
   - (For DCAP support) The latest version of DCAP binaries and driver can be downloaded and installed from https://download.01.org/intel-sgx/ or built from the source from https://github.com/intel/SGXDataCenterAttestationPrimitives.
 
-> **NOTE** This version of CTK is configured to build with, and validated against Intel SGX SDK v2.19.100.3 and SGX in-kernel driver part of Linux kernel v5.18, and SGXSSL binaries without mitigation and with All-Loads-Mitigation for CVE-2020-0551.
+> **NOTE** This version of CTK is configured to build with, and validated against Intel SGX SDK v2.21.100.1 and SGX in-kernel driver part of Linux kernel v5.18, and SGXSSL binaries (Release 3.0_Rev1) built with OpenSSL version 3.0.10) without any mitigation.
 
 ## Building the source
 
