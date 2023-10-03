@@ -55,7 +55,7 @@ The common software requirements for building the CTK are listed below. Please r
   For example in Ubuntu, the build tools and libraries can be obtained by running the command  
 
   ``$ sudo apt-get update``  
-  ``$ sudo apt-get install dkms libprotobuf10 autoconf libcppunit-dev autotools-dev libc6-dev libtool build-essential``
+  ``$ sudo apt-get install dkms autoconf libcppunit-dev autotools-dev libc6-dev libtool build-essential``
 
 - Intel(R) SGX software components  
   -  The SDK, driver and PSW can be downloaded and installed from <a href=https://download.01.org/intel-sgx/latest/linux-latest/distro/ubuntu22.04-server/>Intel SGX Linux 2.21.100.1</a> or can be built from the source from https://github.com/intel/linux-sgx. In-kernel versions of the SGX driver can also be used (from Linux kernel versions 5.11).
