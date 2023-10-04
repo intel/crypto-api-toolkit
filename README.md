@@ -73,7 +73,7 @@ The common software requirements for building the CTK are listed below. Please r
 > **NOTE** Please go through https://github.com/intel/linux-sgx/blob/master/psw/ae/ref_le/ref_le.md to learn about whitelisting the release enclave.
 
 ### Preparing the source for the build
-After downloading the souce, run ``sh autogen.sh``
+After downloading the source, run ``sh autogen.sh``
 
 ``$ sh autogen.sh``
 
