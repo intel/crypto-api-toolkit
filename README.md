@@ -1,4 +1,4 @@
-erypto API Toolkit for Intel(R) SGX
+Crypto API Toolkit for Intel(R) SGX
 ==================================
 
 - [Introduction](#introduction)
