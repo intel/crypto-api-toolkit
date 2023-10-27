@@ -15316,6 +15316,7 @@ CK_OBJECT_HANDLE SoftHSM::getRSAPairKey(const CK_SESSION_HANDLE& hSession,
         rv = FindObjectsInit(hSession, &pTemplate[0], 1);
         if (CKR_OK != rv)
         {
+            C_FindObjectsFinal(hSession);
             return rsaPairKeyHandle;
         }
 
@@ -15325,6 +15326,7 @@ CK_OBJECT_HANDLE SoftHSM::getRSAPairKey(const CK_SESSION_HANDLE& hSession,
         rv = FindObjects(hSession, &hObjects[0], 2, &ulObjectCount);
         if (CKR_OK != rv || 2 != ulObjectCount)
         {
+            C_FindObjectsFinal(hSession);
             return rsaPairKeyHandle;
         }
 
