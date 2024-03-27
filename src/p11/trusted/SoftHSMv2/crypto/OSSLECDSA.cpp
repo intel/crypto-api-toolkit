@@ -70,6 +70,7 @@
 #include "OSSLComp.h"
 #include "OSSLUtil.h"
 #include <algorithm>
+#include <openssl/core_names.h>
 #include <openssl/ecdsa.h>
 #include <openssl/pem.h>
 #include <openssl/err.h>
@@ -85,66 +86,61 @@ bool OSSLECDSA::sign(PrivateKey* privateKey, const ByteString& dataToSign,
 {
 	if (mechanism != AsymMech::ECDSA)
 	{
-		// ERROR_MSG("Invalid mechanism supplied (%i)", mechanism);
 		return false;
 	}
 
 	// Check if the private key is the right type
 	if (!privateKey->isOfType(OSSLECPrivateKey::type))
 	{
-		// ERROR_MSG("Invalid key type supplied");
-
 		return false;
 	}
 
 	OSSLECPrivateKey* pk = (OSSLECPrivateKey*) privateKey;
-	EC_KEY* eckey = pk->getOSSLKey();
+	EVP_PKEY* pkey = pk->getOSSLKey();
 
-	if (eckey == NULL)
+	if (pkey == NULL)
 	{
-		// ERROR_MSG("Could not get the OpenSSL private key");
-
 		return false;
 	}
-
-	// Use the OpenSSL implementation and not any engine
-#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
-
-#ifdef WITH_FIPS
-	if (FIPS_mode())
-		ECDSA_set_method(eckey, FIPS_ecdsa_openssl());
-	else
-		ECDSA_set_method(eckey, ECDSA_OpenSSL());
-#else
-	ECDSA_set_method(eckey, ECDSA_OpenSSL());
-#endif
-
-#else
-	EC_KEY_set_method(eckey, EC_KEY_OpenSSL());
-#endif
 
 	// Perform the signature operation
-	size_t len = pk->getOrderLength();
+	size_t len = pk->getOrderLength() * 2;
+
 	if (len == 0)
 	{
-		// ERROR_MSG("Could not get the order length");
 		return false;
 	}
-	signature.resize(2 * len);
-	memset(&signature[0], 0, 2 * len);
-	ECDSA_SIG *sig = ECDSA_do_sign(dataToSign.const_byte_str(), dataToSign.size(), eckey);
-	if (sig == NULL)
+
+	EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+
+    if (!ctx)
+    {
+        return false;
+    }
+
+    const char sig_name[] = "SHA2-256";
+    if (!EVP_DigestSignInit_ex(ctx, NULL, sig_name, NULL, NULL, pkey, NULL))
 	{
-		// ERROR_MSG("ECDSA sign failed (0x%08X)", ERR_get_error());
+		EVP_MD_CTX_free(ctx);
+        ctx = NULL;
 		return false;
 	}
-	// Store the 2 values with padding
-	const BIGNUM* bn_r = NULL;
-	const BIGNUM* bn_s = NULL;
-	ECDSA_SIG_get0(sig, &bn_r, &bn_s);
-	BN_bn2bin(bn_r, &signature[len - BN_num_bytes(bn_r)]);
-	BN_bn2bin(bn_s, &signature[2 * len - BN_num_bytes(bn_s)]);
-	ECDSA_SIG_free(sig);
+
+	signature.resize(len);
+	memset(&signature[0], 0, len);
+
+	int ret = EVP_DigestSign(ctx, &signature[0], &len, dataToSign.const_byte_str(), dataToSign.size());
+
+    EVP_MD_CTX_free(ctx);
+    ctx = NULL;
+
+	if (!ret)
+	{
+		return false;
+	}
+
+	signature.resize(len);
+
 	return true;
 }
 
@@ -177,83 +173,60 @@ bool OSSLECDSA::verify(PublicKey* publicKey, const ByteString& originalData,
 {
 	if (mechanism != AsymMech::ECDSA)
 	{
-		// ERROR_MSG("Invalid mechanism supplied (%i)", mechanism);
 		return false;
 	}
 
 	// Check if the private key is the right type
 	if (!publicKey->isOfType(OSSLECPublicKey::type))
 	{
-		// ERROR_MSG("Invalid key type supplied");
-
 		return false;
 	}
 
 	OSSLECPublicKey* pk = (OSSLECPublicKey*) publicKey;
-	EC_KEY* eckey = pk->getOSSLKey();
+	EVP_PKEY* pkey = pk->getOSSLKey();
 
-	if (eckey == NULL)
+	if (pkey == NULL)
 	{
-		// ERROR_MSG("Could not get the OpenSSL public key");
-
 		return false;
 	}
-
-	// Use the OpenSSL implementation and not any engine
-#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
-
-#ifdef WITH_FIPS
-	if (FIPS_mode())
-		ECDSA_set_method(eckey, FIPS_ecdsa_openssl());
-	else
-		ECDSA_set_method(eckey, ECDSA_OpenSSL());
-#else
-	ECDSA_set_method(eckey, ECDSA_OpenSSL());
-#endif
-
-#else
-	EC_KEY_set_method(eckey, EC_KEY_OpenSSL());
-#endif
 
 	// Perform the verify operation
-	size_t len = pk->getOrderLength();
+	size_t len = pk->getOrderLength() * 2;
 	if (len == 0)
 	{
-		// ERROR_MSG("Could not get the order length");
-		return false;
-	}
-	if (signature.size() != 2 * len)
-	{
-		// ERROR_MSG("Invalid buffer length");
-		return false;
-	}
-	ECDSA_SIG* sig = ECDSA_SIG_new();
-	if (sig == NULL)
-	{
-		// ERROR_MSG("Could not create an ECDSA_SIG object");
-		return false;
-	}
-	const unsigned char *s = signature.const_byte_str();
-	BIGNUM* bn_r = BN_bin2bn(s, len, NULL);
-	BIGNUM* bn_s = BN_bin2bn(s + len, len, NULL);
-	if (bn_r == NULL || bn_s == NULL ||
-	    !ECDSA_SIG_set0(sig, bn_r, bn_s))
-	{
-		// ERROR_MSG("Could not add data to the ECDSA_SIG object");
-		ECDSA_SIG_free(sig);
-		return false;
-	}
-	int ret = ECDSA_do_verify(originalData.const_byte_str(), originalData.size(), sig, eckey);
-	if (ret != 1)
-	{
-		if (ret < 0)
-			// ERROR_MSG("ECDSA verify failed (0x%08X)", ERR_get_error());
-
-		ECDSA_SIG_free(sig);
 		return false;
 	}
 
-	ECDSA_SIG_free(sig);
+	if (signature.size() > len)
+	{
+		return false;
+	}
+
+	EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+
+    if (!ctx)
+    {
+        return false;
+    }
+
+    const char sig_name[] = "SHA2-256";
+    if (!EVP_DigestVerifyInit_ex(ctx, NULL, sig_name, NULL, NULL, pkey, NULL))
+	{
+		EVP_MD_CTX_free(ctx);
+        ctx = NULL;
+		return false;
+	}
+
+	int ret = EVP_DigestVerify(ctx, signature.const_byte_str(), signature.size(), originalData.const_byte_str(), originalData.size());
+
+    EVP_MD_CTX_free(ctx);
+    ctx = NULL;
+
+	if (!ret)
+	{
+		return false;
+	}
+
 	return true;
 }
 
@@ -315,40 +288,72 @@ bool OSSLECDSA::generateKeyPair(AsymmetricKeyPair** ppKeyPair, AsymmetricParamet
 		return false;
 	}
 
-	ECParameters* params = (ECParameters*) parameters;
-
-	// Generate the key-pair
-	EC_KEY* eckey = EC_KEY_new();
-	if (eckey == NULL)
-	{
-		// ERROR_MSG("Failed to instantiate OpenSSL ECDSA object");
-
-		return false;
-	}
-
+    ECParameters* params = (ECParameters*) parameters;
 	EC_GROUP* grp = OSSL::byteString2grp(params->getEC());
-	EC_KEY_set_group(eckey, grp);
-	EC_GROUP_free(grp);
 
-	if (!EC_KEY_generate_key(eckey))
-	{
-		// ERROR_MSG("ECDSA key generation failed (0x%08X)", ERR_get_error());
+    if (grp == NULL)
+    {
+        return false;
+    }
 
-		EC_KEY_free(eckey);
+    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_from_name(NULL, "EC", NULL);
+    EVP_PKEY_keygen_init(ctx);
 
-		return false;
-	}
+    if (!ctx)
+    {
+        return false;
+    }
+
+    int curve_id = EC_GROUP_get_curve_name(grp);
+    OSSL_PARAM ossl_params[2];
+
+    if (curve_id == NID_X9_62_prime256v1)
+    {
+        ossl_params[0] = OSSL_PARAM_construct_utf8_string(OSSL_PKEY_PARAM_GROUP_NAME, (char*)"P-256", 0);
+    }
+    else if (curve_id == NID_secp384r1)
+    {
+        ossl_params[0] = OSSL_PARAM_construct_utf8_string(OSSL_PKEY_PARAM_GROUP_NAME, (char*)"P-384", 0);
+    }
+    else if (curve_id == NID_secp521r1)
+    {
+        ossl_params[0] = OSSL_PARAM_construct_utf8_string(OSSL_PKEY_PARAM_GROUP_NAME, (char*)"P-521", 0);
+    }
+    else
+    {
+        EVP_PKEY_CTX_free(ctx);
+        ctx = NULL;
+        return false;
+    }
+
+    ossl_params[1] = OSSL_PARAM_construct_end();
+    if (!EVP_PKEY_CTX_set_params(ctx, ossl_params))
+    {
+        EVP_PKEY_CTX_free(ctx);
+        ctx = NULL;
+        return false;
+    }
+
+    EVP_PKEY* pkey = NULL;
+    if (EVP_PKEY_generate(ctx, &pkey) <= 0)
+    {
+        EVP_PKEY_CTX_free(ctx);
+        ctx = NULL;
+        return false;
+    }
+
+    EVP_PKEY_CTX_free(ctx);
 
 	// Create an asymmetric key-pair object to return
 	OSSLECKeyPair* kp = new OSSLECKeyPair();
 
-	((OSSLECPublicKey*) kp->getPublicKey())->setFromOSSL(eckey);
-	((OSSLECPrivateKey*) kp->getPrivateKey())->setFromOSSL(eckey);
+	((OSSLECPublicKey*) kp->getPublicKey())->setFromOSSL(pkey);
+	((OSSLECPrivateKey*) kp->getPrivateKey())->setFromOSSL(pkey);
 
 	*ppKeyPair = kp;
 
 	// Release the key
-	EC_KEY_free(eckey);
+	EVP_PKEY_free(pkey);
 
 	return true;
 }

@@ -723,7 +723,7 @@ void SymmetricAlgorithmTests::aesWrapUnwrapRsa(CK_MECHANISM_TYPE mechanismType, 
     rv = CRYPTOKI_F_PTR( C_SetAttributeValue(hSession, hPrk, pTemplate, sizeof(pTemplate)/sizeof(CK_ATTRIBUTE)) );
     CPPUNIT_ASSERT(rv == CKR_ATTRIBUTE_TYPE_INVALID);
 
-    memset(keyPtr, keyLen, 0);
+    memset(keyPtr, 0, keyLen);
     rv = CRYPTOKI_F_PTR( C_GetAttributeValue(hSession, hPrk, pTemplate, sizeof(pTemplate)/sizeof(CK_ATTRIBUTE)) );
     CPPUNIT_ASSERT(rv == CKR_ATTRIBUTE_TYPE_INVALID);
 
@@ -2059,7 +2059,7 @@ void SymmetricAlgorithmTests::aesWrapUnwrap(CK_MECHANISM_TYPE mechanismType,
         rv = CRYPTOKI_F_PTR( C_SetAttributeValue(hSession, hUnwrappedKey, pTemplate, sizeof(pTemplate)/sizeof(CK_ATTRIBUTE)) );
         CPPUNIT_ASSERT(rv == CKR_ATTRIBUTE_TYPE_INVALID);
 
-        memset(keyPtr, keyLen, 0);
+        memset(keyPtr, 0, keyLen);
         rv = CRYPTOKI_F_PTR( C_GetAttributeValue(hSession, hUnwrappedKey, pTemplate, sizeof(pTemplate)/sizeof(CK_ATTRIBUTE)) );
         CPPUNIT_ASSERT(rv == CKR_ATTRIBUTE_TYPE_INVALID);
 

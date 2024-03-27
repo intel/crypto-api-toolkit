@@ -5652,14 +5652,29 @@ static CK_RV AsymSign(Session* session, CK_BYTE_PTR pData, CK_ULONG ulDataLen, C
 	}
 
 	// Check size
-	if (signature.size() != size)
-	{
-		// ERROR_MSG("The size of the signature differs from the size of the mechanism");
-		session->resetOp();
-		return CKR_GENERAL_ERROR;
-	}
+    // For EC, we can only check the upper bound:
+    // See: https://github.com/openssl/openssl/issues/23177
+    if (mechanism == AsymMech::ECDSA)
+    {
+        if (signature.size() > size)
+        {
+            // ERROR_MSG("The size of the signature differs from the size of the mechanism");
+            session->resetOp();
+            return CKR_GENERAL_ERROR;
+        }
+        size = signature.size();
+    }
+    else
+    {
+        if (signature.size() != size)
+        {
+            // ERROR_MSG("The size of the signature differs from the size of the mechanism");
+            session->resetOp();
+            return CKR_GENERAL_ERROR;
+        }
+    }
     memcpy_s(pSignature, *pulSignatureLen, signature.byte_str(), size);
-	*pulSignatureLen = size;
+    *pulSignatureLen = size;
 
 	session->resetOp();
 	return CKR_OK;
@@ -6718,23 +6733,38 @@ static CK_RV AsymVerify(Session* session, CK_BYTE_PTR pData, CK_ULONG ulDataLen,
 	CK_ULONG size = publicKey->getOutputLength();
 
 	// Check buffer size
-	if (ulSignatureLen != size)
-	{
-		// ERROR_MSG("The size of the signature differs from the size of the mechanism");
-		session->resetOp();
-		return CKR_SIGNATURE_LEN_RANGE;
-	}
+    // For EC, we can only check the upper bound:
+    // See: https://github.com/openssl/openssl/issues/23177
+    if (mechanism == AsymMech::ECDSA)
+    {
+        if (ulSignatureLen > size)
+        {
+            // ERROR_MSG("The size of the signature differs from the size of the mechanism");
+            session->resetOp();
+            return CKR_SIGNATURE_LEN_RANGE;
+        }
+        size = ulSignatureLen;
+    }
+    else
+    {
+        if (ulSignatureLen != size)
+        {
+            // ERROR_MSG("The size of the signature differs from the size of the mechanism");
+            session->resetOp();
+            return CKR_SIGNATURE_LEN_RANGE;
+        }
+    }
 
-	// Get the data
-	ByteString data;
+    // Get the data
+    ByteString data;
 
-	// We must allow input length <= k and therfore need to prepend the data with zeroes.
-	if (mechanism == AsymMech::RSA) {
-		data.wipe(size-ulDataLen);
-	}
+    // We must allow input length <= k and therfore need to prepend the data with zeroes.
+    if (mechanism == AsymMech::RSA) {
+        data.wipe(size-ulDataLen);
+    }
 
-	data += ByteString(pData, ulDataLen);
-	ByteString signature(pSignature, ulSignatureLen);
+    data += ByteString(pData, ulDataLen);
+    ByteString signature(pSignature, size);
 
 	// Verify the data
 	if (session->getAllowMultiPartOp())

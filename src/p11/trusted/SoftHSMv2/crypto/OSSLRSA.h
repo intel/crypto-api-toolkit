@@ -113,9 +113,7 @@ public:
 	virtual AsymmetricParameters* newParameters();
 
 private:
-	HashAlgorithm* pCurrentHash;
-	HashAlgorithm* pSecondHash;
-	size_t sLen;
+    EVP_MD_CTX* sign_ver_ctx;
 };
 
 #endif // !_SOFTHSM_V2_OSSLRSA_H

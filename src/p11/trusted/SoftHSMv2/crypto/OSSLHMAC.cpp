@@ -32,13 +32,14 @@
 
 #include "config.h"
 #include "OSSLHMAC.h"
+#include <openssl/core_names.h>
 #ifdef WITH_GOST
 #include "OSSLCryptoFactory.h"
 #endif
 
-const EVP_MD* OSSLHMACMD5::getEVPHash() const
+char* OSSLHMACMD5::getHashAlgo() const
 {
-	return EVP_md5();
+	return (char*) OSSL_DIGEST_NAME_MD5;
 }
 
 size_t OSSLHMACMD5::getMacSize() const
@@ -46,9 +47,9 @@ size_t OSSLHMACMD5::getMacSize() const
 	return 16;
 }
 
-const EVP_MD* OSSLHMACSHA1::getEVPHash() const
+char* OSSLHMACSHA1::getHashAlgo() const
 {
-	return EVP_sha1();
+	return (char*) OSSL_DIGEST_NAME_SHA1;
 }
 
 size_t OSSLHMACSHA1::getMacSize() const
@@ -56,9 +57,9 @@ size_t OSSLHMACSHA1::getMacSize() const
 	return 20;
 }
 
-const EVP_MD* OSSLHMACSHA224::getEVPHash() const
+char* OSSLHMACSHA224::getHashAlgo() const
 {
-	return EVP_sha224();
+	return (char*) OSSL_DIGEST_NAME_SHA2_224;
 }
 
 size_t OSSLHMACSHA224::getMacSize() const
@@ -66,9 +67,9 @@ size_t OSSLHMACSHA224::getMacSize() const
 	return 28;
 }
 
-const EVP_MD* OSSLHMACSHA256::getEVPHash() const
+char* OSSLHMACSHA256::getHashAlgo() const
 {
-	return EVP_sha256();
+	return (char*) OSSL_DIGEST_NAME_SHA2_256;
 }
 
 size_t OSSLHMACSHA256::getMacSize() const
@@ -76,9 +77,9 @@ size_t OSSLHMACSHA256::getMacSize() const
 	return 32;
 }
 
-const EVP_MD* OSSLHMACSHA384::getEVPHash() const
+char* OSSLHMACSHA384::getHashAlgo() const
 {
-	return EVP_sha384();
+	return (char*) OSSL_DIGEST_NAME_SHA2_384;
 }
 
 size_t OSSLHMACSHA384::getMacSize() const
@@ -86,24 +87,12 @@ size_t OSSLHMACSHA384::getMacSize() const
 	return 48;
 }
 
-const EVP_MD* OSSLHMACSHA512::getEVPHash() const
+char* OSSLHMACSHA512::getHashAlgo() const
 {
-	return EVP_sha512();
+	return (char*) OSSL_DIGEST_NAME_SHA2_512;
 }
 
 size_t OSSLHMACSHA512::getMacSize() const
 {
 	return 64;
 }
-
-#ifdef WITH_GOST
-const EVP_MD* OSSLHMACGOSTR3411::getEVPHash() const
-{
-	return OSSLCryptoFactory::i()->EVP_GOST_34_11;
-}
-
-size_t OSSLHMACGOSTR3411::getMacSize() const
-{
-	return 32;
-}
-#endif

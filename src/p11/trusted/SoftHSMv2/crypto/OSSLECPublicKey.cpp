@@ -63,69 +63,80 @@
 
 #include "config.h"
 #ifdef WITH_ECC
+#include "DerUtil.h"
 #include "OSSLECPublicKey.h"
 #include "OSSLUtil.h"
 #include <openssl/bn.h>
+#include <openssl/evp.h>
+#include <openssl/x509.h>
+#include <openssl/decoder.h>
 #include <string.h>
+#include <mbusafecrt.h>
 
 // Constructors
 OSSLECPublicKey::OSSLECPublicKey()
 {
-	eckey = EC_KEY_new();
+    nid = NID_undef;
+    pkey = NULL;
 }
 
-OSSLECPublicKey::OSSLECPublicKey(const EC_KEY* inECKEY)
+OSSLECPublicKey::OSSLECPublicKey(const EVP_PKEY* inPKEY)
 {
-	eckey = EC_KEY_new();
+    nid = NID_undef;
+    pkey = NULL;
 
-	setFromOSSL(inECKEY);
+	setFromOSSL(inPKEY);
 }
 
 // Destructor
 OSSLECPublicKey::~OSSLECPublicKey()
 {
-	EC_KEY_free(eckey);
+	EVP_PKEY_free(pkey);
+    pkey = NULL;
 }
 
 // The type
 /*static*/ const char* OSSLECPublicKey::type = "OpenSSL EC Public Key";
 
-// Get the base point order length
+// Get the maximum possible signature length for the key
 unsigned long OSSLECPublicKey::getOrderLength() const
 {
-	const EC_GROUP* grp = EC_KEY_get0_group(eckey);
-	if (grp != NULL)
-	{
-		BIGNUM* order = BN_new();
-		if (order == NULL)
-			return 0;
-		if (!EC_GROUP_get_order(grp, order, NULL))
-		{
-			BN_clear_free(order);
-			return 0;
-		}
-		unsigned long len = BN_num_bytes(order);
-		BN_clear_free(order);
-		return len;
-	}
-	return 0;
+    // getOutPutLength() multiplies the result by 2, so we are halving it here
+    // Adding + 1 gives enough buffer if the returned signature length is odd
+    return (getSignatureLength() + 1) / 2;
 }
 
 // Set from OpenSSL representation
-void OSSLECPublicKey::setFromOSSL(const EC_KEY* inECKEY)
+void OSSLECPublicKey::setFromOSSL(const EVP_PKEY* inPKEY)
 {
-	const EC_GROUP* grp = EC_KEY_get0_group(inECKEY);
-	if (grp != NULL)
-	{
-		ByteString inEC = OSSL::grp2ByteString(grp);
-		setEC(inEC);
-	}
-	const EC_POINT* pub = EC_KEY_get0_public_key(inECKEY);
-	if (pub != NULL && grp != NULL)
-	{
-		ByteString inQ = OSSL::pt2ByteString(pub, grp);
-		setQ(inQ);
-	}
+    char grpName[30];
+    size_t groupNameLen = 0;
+    if (EVP_PKEY_get_group_name(inPKEY, grpName, sizeof(grpName), &groupNameLen) != 0)
+    {
+        EC_GROUP *grp = EC_GROUP_new_by_curve_name(OBJ_sn2nid(grpName));
+        if (grp != NULL)
+        {
+            ByteString inEC = OSSL::grp2ByteString(grp);
+            setEC(inEC);
+        }
+    }
+
+    // i2d_PUBKEY incorrectly does not const the key argument?!
+    EVP_PKEY* key = const_cast<EVP_PKEY*>(inPKEY);
+    int len = i2d_PUBKEY(key, NULL);
+    if (len <= 0)
+    {
+        // ERROR_MSG("Could not encode ECDSA public key");
+        return;
+    }
+    ByteString der;
+    der.resize(len);
+    unsigned char *p = &der[0];
+    i2d_PUBKEY(key, &p);
+    ByteString raw;
+    raw.resize(len);
+    memcpy_s(&raw[0], len, &der[0], len);
+    setQ(DERUTIL::raw2Octet(raw));
 }
 
 // Check if the key is of the given type
@@ -137,25 +148,77 @@ bool OSSLECPublicKey::isOfType(const char* inType)
 // Setters for the EC public key components
 void OSSLECPublicKey::setEC(const ByteString& inEC)
 {
+    nid = OSSL::byteString2oid(inEC);
 	ECPublicKey::setEC(inEC);
 
-	EC_GROUP* grp = OSSL::byteString2grp(inEC);
-	EC_KEY_set_group(eckey, grp);
-	EC_GROUP_free(grp);
+    if (pkey)
+    {
+        EVP_PKEY_free(pkey);
+        pkey = NULL;
+    }
 }
 
 void OSSLECPublicKey::setQ(const ByteString& inQ)
 {
 	ECPublicKey::setQ(inQ);
 
-	EC_POINT* pub = OSSL::byteString2pt(inQ, EC_KEY_get0_group(eckey));
-	EC_KEY_set_public_key(eckey, pub);
-	EC_POINT_free(pub);
+    if (pkey)
+    {
+        EVP_PKEY_free(pkey);
+        pkey = NULL;
+    }
 }
 
 // Retrieve the OpenSSL representation of the key
-EC_KEY* OSSLECPublicKey::getOSSLKey()
+EVP_PKEY* OSSLECPublicKey::getOSSLKey()
 {
-	return eckey;
+    if (pkey == NULL) createOSSLKey();
+    return pkey;
+}
+
+void OSSLECPublicKey::createOSSLKey()
+{
+    if (pkey != NULL) return;
+
+	ByteString der = DERUTIL::octet2Raw(q);
+	size_t len = der.size();
+	if (len == 0) return;
+    const unsigned char *p = &der[0];
+    size_t dataLen = der.size();
+    OSSL_DECODER_CTX* ctx = OSSL_DECODER_CTX_new_for_pkey(&pkey, "DER", NULL, "EC",
+                                        EVP_PKEY_PUBLIC_KEY, NULL, NULL);
+
+    if (!ctx)
+    {
+        return;
+    }
+    (void)OSSL_DECODER_from_data(ctx, &p, &dataLen);
+    OSSL_DECODER_CTX_free(ctx);
+}
+
+unsigned long OSSLECPublicKey::getSignatureLength() const
+{
+    if (pkey == NULL)
+    {
+        ByteString der = DERUTIL::octet2Raw(q);
+        size_t len = der.size();
+        if (len == 0) return 0;
+        const unsigned char *p = &der[0];
+        size_t dataLen = len;
+        EVP_PKEY *tmpPKEY = NULL;
+        OSSL_DECODER_CTX* ctx = OSSL_DECODER_CTX_new_for_pkey(&tmpPKEY, "DER", NULL, "EC",
+                                                              EVP_PKEY_PUBLIC_KEY, NULL, NULL);
+        if (!ctx)
+        {
+            return 0;
+        }
+        (void)OSSL_DECODER_from_data(ctx, &p, &dataLen);
+        OSSL_DECODER_CTX_free(ctx);
+        unsigned long sigLen = (unsigned long)EVP_PKEY_size(tmpPKEY);
+        EVP_PKEY_free(tmpPKEY);
+        return sigLen;
+    }
+
+    return (unsigned long)EVP_PKEY_size(pkey);
 }
 #endif

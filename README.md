@@ -55,14 +55,14 @@ The common software requirements for building the CTK are listed below. Please r
   For example in Ubuntu, the build tools and libraries can be obtained by running the command  
 
   ``$ sudo apt-get update``  
-  ``$ sudo apt-get install dkms libprotobuf10 autoconf libcppunit-dev autotools-dev libc6-dev libtool build-essential``
+  ``$ sudo apt-get install dkms libprotobuf-dev autoconf libcppunit-dev autotools-dev libc6-dev libtool build-essential``
 
 - Intel(R) SGX software components  
-  -  The SDK, driver and PSW can be downloaded and installed from <a href=https://download.01.org/intel-sgx/latest/linux-latest/distro/ubuntu22.04-server/>Intel SGX Linux 2.21.100.1</a> or can be built from the source from https://github.com/intel/linux-sgx. In-kernel versions of the SGX driver can also be used (from Linux kernel versions 5.11).
-  - Intel(R) SGX SSL can be built and installed from the source (https://github.com/intel/intel-sgx-ssl/tree/3.0_Rev1). CTK has been validated with Intel(R) SGX SSL (Release 3.0_Rev1) built with OpenSSL version 3.0.10 without mitigation.
+  -  The SDK, driver and PSW can be downloaded and installed from <a href=https://download.01.org/intel-sgx/latest/linux-latest/distro/ubuntu22.04-server/>Intel SGX Linux 2.23.100.2</a> or can be built from the source from https://github.com/intel/linux-sgx. In-kernel versions of the SGX driver can also be used (from Linux kernel versions 5.11).
+  - Intel(R) SGX SSL can be built and installed from the source (https://github.com/intel/intel-sgx-ssl/tree/3.0_Rev2). CTK has been validated with Intel(R) SGX SSL (Release 3.0_Rev2) built with OpenSSL version 3.0.12 without mitigation.
   - (For DCAP support) The latest version of DCAP binaries and driver can be downloaded and installed from https://download.01.org/intel-sgx/ or built from the source from https://github.com/intel/SGXDataCenterAttestationPrimitives.
 
-> **NOTE** This version of CTK is configured to build with, and validated against Intel SGX SDK v2.21.100.1 and SGX in-kernel driver part of Linux kernel v5.18, and SGXSSL binaries (Release 3.0_Rev1) built with OpenSSL version 3.0.10) without any mitigation.
+> **NOTE** This version of CTK is configured to build with, and validated against Intel SGX SDK v2.23 and SGX in-kernel driver part of Linux kernel v5.18, and SGXSSL binaries (Release 3.0_Rev2) built with OpenSSL version 3.0.12) without any mitigation.
 
 ## Building the source
 

@@ -1419,7 +1419,7 @@ void ObjectTests::testSetAttributeValue()
     rv = CRYPTOKI_F_PTR( C_SetAttributeValue(hSessionRW, hPrk, pTemplate, sizeof(pTemplate)/sizeof(CK_ATTRIBUTE)) );
     CPPUNIT_ASSERT(rv == CKR_ATTRIBUTE_TYPE_INVALID);
 
-    memset(keyPtr, keyLen, 0);
+    memset(keyPtr, 0, keyLen);
     rv = CRYPTOKI_F_PTR( C_GetAttributeValue(hSessionRW, hPrk, pTemplate, sizeof(pTemplate)/sizeof(CK_ATTRIBUTE)) );
     CPPUNIT_ASSERT(rv == CKR_ATTRIBUTE_TYPE_INVALID);
 
@@ -2698,7 +2698,7 @@ void ObjectTests::generateAesKey(CK_SESSION_HANDLE hSession,
     rv = CRYPTOKI_F_PTR( C_SetAttributeValue(hSession, hKey, pTemplate, sizeof(pTemplate)/sizeof(CK_ATTRIBUTE)) );
     CPPUNIT_ASSERT(rv == CKR_ATTRIBUTE_TYPE_INVALID);
 
-    memset(keyPtr, keyLen, 0);
+    memset(keyPtr, 0, keyLen);
     rv = CRYPTOKI_F_PTR( C_GetAttributeValue(hSession, hKey, pTemplate, sizeof(pTemplate)/sizeof(CK_ATTRIBUTE)) );
     CPPUNIT_ASSERT(rv == CKR_ATTRIBUTE_TYPE_INVALID);
 

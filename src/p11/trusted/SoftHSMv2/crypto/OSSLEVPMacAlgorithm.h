@@ -66,11 +66,11 @@ public:
 
 protected:
 	// Return the right hash for the operation
-	virtual const EVP_MD* getEVPHash() const = 0;
+	virtual char* getHashAlgo() const = 0;
 
 private:
 	// The current context
-	HMAC_CTX* curCTX;
+	EVP_MAC_CTX * curCTX;
 };
 
 #endif // !_SOFTHSM_V2_OSSLEVPMACALGORITHM_H

@@ -40,42 +40,42 @@
 class OSSLHMACMD5 : public OSSLEVPMacAlgorithm
 {
 protected:
-	virtual const EVP_MD* getEVPHash() const;
+	virtual char* getHashAlgo() const;
 	virtual size_t getMacSize() const;
 };
 
 class OSSLHMACSHA1 : public OSSLEVPMacAlgorithm
 {
 protected:
-	virtual const EVP_MD* getEVPHash() const;
+	virtual char* getHashAlgo() const;
 	virtual size_t getMacSize() const;
 };
 
 class OSSLHMACSHA224 : public OSSLEVPMacAlgorithm
 {
 protected:
-	virtual const EVP_MD* getEVPHash() const;
+	virtual char* getHashAlgo() const;
 	virtual size_t getMacSize() const;
 };
 
 class OSSLHMACSHA256 : public OSSLEVPMacAlgorithm
 {
 protected:
-	virtual const EVP_MD* getEVPHash() const;
+	virtual char* getHashAlgo() const;
 	virtual size_t getMacSize() const;
 };
 
 class OSSLHMACSHA384 : public OSSLEVPMacAlgorithm
 {
 protected:
-	virtual const EVP_MD* getEVPHash() const;
+	virtual char* getHashAlgo() const;
 	virtual size_t getMacSize() const;
 };
 
 class OSSLHMACSHA512 : public OSSLEVPMacAlgorithm
 {
 protected:
-	virtual const EVP_MD* getEVPHash() const;
+	virtual char* getHashAlgo() const;
 	virtual size_t getMacSize() const;
 };
 
@@ -83,10 +83,11 @@ protected:
 class OSSLHMACGOSTR3411 : public OSSLEVPMacAlgorithm
 {
 protected:
-	virtual const EVP_MD* getEVPHash() const;
+	virtual char* getHashAlgo() const;
 	virtual size_t getMacSize() const;
 };
 #endif
 
 #endif // !_SOFTHSM_V2_OSSLHMAC_H
+
 

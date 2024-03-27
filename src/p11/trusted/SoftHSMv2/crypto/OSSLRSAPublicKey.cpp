@@ -67,6 +67,8 @@
 #include "OSSLUtil.h"
 #include <string.h>
 #include <openssl/bn.h>
+#include <openssl/core_names.h>
+#include <openssl/param_build.h>
 #ifdef WITH_FIPS
 #include <openssl/fips.h>
 #endif
@@ -77,17 +79,17 @@ OSSLRSAPublicKey::OSSLRSAPublicKey()
 	rsa = NULL;
 }
 
-OSSLRSAPublicKey::OSSLRSAPublicKey(const RSA* inRSA)
+OSSLRSAPublicKey::OSSLRSAPublicKey(const EVP_PKEY* inPKEY)
 {
 	rsa = NULL;
 
-	setFromOSSL(inRSA);
+	setFromOSSL(inPKEY);
 }
 
 // Destructor
 OSSLRSAPublicKey::~OSSLRSAPublicKey()
 {
-	RSA_free(rsa);
+	EVP_PKEY_free(rsa);
 }
 
 // The type
@@ -100,23 +102,26 @@ bool OSSLRSAPublicKey::isOfType(const char* inType)
 }
 
 // Set from OpenSSL representation
-void OSSLRSAPublicKey::setFromOSSL(const RSA* inRSA)
+void OSSLRSAPublicKey::setFromOSSL(const EVP_PKEY* pkey)
 {
-	const BIGNUM* bn_n = NULL;
-	const BIGNUM* bn_e = NULL;
+	BIGNUM* bn_n = NULL;
+	BIGNUM* bn_e = NULL;
 
-	RSA_get0_key(inRSA, &bn_n, &bn_e, NULL);
+    if ((EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_N, &bn_n) == 0) || !bn_n)
+    {
+        return;
+    }
 
-	if (bn_n)
-	{
-		ByteString inN = OSSL::bn2ByteString(bn_n);
-		setN(inN);
-	}
-	if (bn_e)
-	{
-		ByteString inE = OSSL::bn2ByteString(bn_e);
+    if ((EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_E, &bn_e) == 0) || !bn_e)
+    {
+        return;
+    }
+
+    ByteString inN = OSSL::bn2ByteString(bn_n);
+    setN(inN);
+
+    ByteString inE = OSSL::bn2ByteString(bn_e);
 		setE(inE);
-	}
 }
 
 // Setters for the RSA public key components
@@ -126,7 +131,7 @@ void OSSLRSAPublicKey::setN(const ByteString& inN)
 
 	if (rsa)
 	{
-		RSA_free(rsa);
+        EVP_PKEY_free(rsa);
 		rsa = NULL;
 	}
 }
@@ -137,13 +142,13 @@ void OSSLRSAPublicKey::setE(const ByteString& inE)
 
 	if (rsa)
 	{
-		RSA_free(rsa);
+        EVP_PKEY_free(rsa);
 		rsa = NULL;
 	}
 }
 
 // Retrieve the OpenSSL representation of the key
-RSA* OSSLRSAPublicKey::getOSSLKey()
+EVP_PKEY* OSSLRSAPublicKey::getOSSLKey()
 {
 	if (rsa == NULL) createOSSLKey();
 
@@ -155,31 +160,33 @@ void OSSLRSAPublicKey::createOSSLKey()
 {
 	if (rsa != NULL) return;
 
-	rsa = RSA_new();
-	if (rsa == NULL)
-	{
-		// ERROR_MSG("Could not create RSA object");
-		return;
-	}
-
-	// Use the OpenSSL implementation and not any engine
-#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
-
-#ifdef WITH_FIPS
-	if (FIPS_mode())
-		RSA_set_method(rsa, FIPS_rsa_pkcs1_ssleay());
-	else
-		RSA_set_method(rsa, RSA_PKCS1_SSLeay());
-#else
-	RSA_set_method(rsa, RSA_PKCS1_SSLeay());
-#endif
-
-#else
-	RSA_set_method(rsa, RSA_PKCS1_OpenSSL());
-#endif
+    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_from_name(NULL, "RSA", NULL);
+    if (!ctx)
+    {
+        //EVP_PKEY_CTX_free(ctx);
+        return;
+    }
 
 	BIGNUM* bn_n = OSSL::byteString2bn(n);
 	BIGNUM* bn_e = OSSL::byteString2bn(e);
 
-	RSA_set0_key(rsa, bn_n, bn_e, NULL);
+    OSSL_PARAM_BLD *tmpl = NULL;
+    OSSL_PARAM *params = NULL;
+
+    if ((tmpl = OSSL_PARAM_BLD_new()) == NULL
+        || !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_N, bn_n)
+        || !OSSL_PARAM_BLD_push_BN(tmpl, OSSL_PKEY_PARAM_RSA_E, bn_e)
+        || (params = OSSL_PARAM_BLD_to_param(tmpl)) == NULL)
+    {
+        EVP_PKEY_CTX_free(ctx);
+        return;
+    }
+
+    if (EVP_PKEY_fromdata_init(ctx) <= 0
+        || EVP_PKEY_fromdata(ctx, &rsa, EVP_PKEY_PUBLIC_KEY, params) <= 0)
+    {
+        rsa = NULL;
+        EVP_PKEY_CTX_free(ctx);
+        return;
+    }
 }

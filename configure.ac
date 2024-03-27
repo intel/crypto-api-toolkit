@@ -35,34 +35,33 @@ AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE([foreign -Wall])
 m4_ifdef([AM_PROG_AR], [AM_PROG_AR])
 LT_INIT([dlopen], [disable-static])
-AC_LIBTOOL_DLOPEN()
 
 AC_PROG_CXX
 
 AC_ARG_WITH([sgxsdk],
-            AC_HELP_STRING([--with-sgxsdk], [Requires SGX SDK. Will default to /opt/intel/sgxsdk]),
+            AS_HELP_STRING([--with-sgxsdk], [Requires SGX SDK. Will default to /opt/intel/sgxsdk]),
             [SGXSDK="${withval}"],
             [echo "--with-sgxsdk option not set. Defaults to /opt/intel/sgxsdk"; SGXSDK="/opt/intel/sgxsdk"])
 
 AC_ARG_WITH([sgxssl],
-            AC_HELP_STRING([--with-sgxssl], [Requires SGX SSL. Will default to /opt/intel/sgxssl]),
+            AS_HELP_STRING([--with-sgxssl], [Requires SGX SSL. Will default to /opt/intel/sgxssl]),
             [SGXSSL="${withval}"],
             [echo "--with-sgxssl option not set. Defaults to /opt/intel/sgxssl"; SGXSSL="/opt/intel/sgxssl"])
 
 AC_ARG_WITH([token-path],
-            AC_HELP_STRING([--with-token-path], [Will default to /opt/intel/cryptoapitoolkit]),
+            AS_HELP_STRING([--with-token-path], [Will default to /opt/intel/cryptoapitoolkit]),
             [TOKENPATH="${withval}"],
             [echo "--with-token-path option not set. Defaults to /opt/intel/cryptoapitoolkit"; TOKENPATH="/opt/intel/cryptoapitoolkit"])
 
 AC_ARG_WITH([p11-kit-path],
-            AC_HELP_STRING([--with-p11-kit-path], [Requires p11-kit include directory.]),
+            AS_HELP_STRING([--with-p11-kit-path], [Requires p11-kit include directory.]),
             [P11KITINCLUDEPATH="${withval}"],
             [echo "--with-p11-kit-path option not set. Not including PKCS11 headers from p11-kit."; P11KITINCLUDEPATH="no"])
 
 AM_CONDITIONAL(WITH_DCAP, false)
 
 AC_ARG_ENABLE([dcap],
-              AC_HELP_STRING([--enable-dcap], [To enable dcap supported build]),
+              AS_HELP_STRING([--enable-dcap], [To enable dcap supported build]),
               [
               ENABLE_DCAP="${enableval}"
               ],
@@ -71,7 +70,7 @@ AC_ARG_ENABLE([dcap],
 AM_CONDITIONAL(WITH_MITIGATION, false)
 
 AC_ARG_ENABLE([mitigation],
-              AC_HELP_STRING([--enable-mitigation], [Enable mitigations for CVE-2020-0551 (LVI) and other vulnerabilities]),
+              AS_HELP_STRING([--enable-mitigation], [Enable mitigations for CVE-2020-0551 (LVI) and other vulnerabilities]),
               [
               AC_DEFINE([ENABLE_MITIGATION], [], [ENABLE MITIGATION])
               AM_CONDITIONAL(WITH_MITIGATION, true)
@@ -99,12 +98,12 @@ AS_IF([test "x$ENABLE_DCAP" = "xyes"],
       )
 
 AC_ARG_ENABLE([multiprocess-support],
-              AC_HELP_STRING([--disable-multiprocess-support ], [If the token is not expected to be simultaneously accessed for modification by multiple processes (write/update/delete), this flag can give a performance boost.]),
+              AS_HELP_STRING([--disable-multiprocess-support ], [If the token is not expected to be simultaneously accessed for modification by multiple processes (write/update/delete), this flag can give a performance boost.]),
               [AC_DEFINE([MULTIPROCESS_SUPPORT_DISABLED], [], [MULTIPROCESS SUPPORT DISABLED])],
               [echo "--disable-multiprocess-support option not set. If the token is not expected to be simultaneously accessed for modification by multiple processes (write/update/delete), this flag can give a performance boost."])
 
 AC_ARG_WITH([public-key],
-            AC_HELP_STRING([--with-public-key], [Public key to be embedded into CTK build]),
+            AS_HELP_STRING([--with-public-key], [Public key to be embedded into CTK build]),
             [PUBKEY="${withval}"],
             [echo "--with-public-key option not set"; PUBKEY=""])
 
@@ -121,7 +120,7 @@ else
 fi
 
 AC_ARG_WITH([private-key],
-            AC_HELP_STRING([--with-private-key], [Test purpose only, private key to enable C_Wrapkey calls in p11test.]),
+            AS_HELP_STRING([--with-private-key], [Test purpose only, private key to enable C_Wrapkey calls in p11test.]),
             [PRIVKEY="${withval}"],
             [echo "--with-private-key option not set."; PRIVKEY=""])
 
@@ -139,7 +138,7 @@ AC_DEFINE_UNQUOTED([PRIVATE_KEY], "${PRIVKEY}", [RSA private key path])
 AC_DEFINE_UNQUOTED([PUBLIC_KEY], "${PUBKEY}", [RSA public key path])
 
 AC_ARG_ENABLE([session-key-wrap],
-              AC_HELP_STRING([--enable-session-key-wrap ], [This option enables wrapping a session key.]),
+              AS_HELP_STRING([--enable-session-key-wrap ], [This option enables wrapping a session key.]),
               [AC_DEFINE([SESSION_KEY_WRAP_SUPPORT], [], [WRAPPING A SESSION KEY IS SUPPORTED])],
               [echo "--enable-session-key-wrap option not set. Session keys cannot be wrapped."])
 

@@ -273,26 +273,28 @@ CK_RV OSUnlockMutex(CK_VOID_PTR mutex)
 #error "There are no mutex implementations for your operating system yet"
 #endif
 #else
-#include <mutex>
+#include "sgx_spinlock.h"
 
 CK_RV OSCreateMutex(CK_VOID_PTR_PTR newMutex)
 {
 	/* Allocate memory */
-    std::mutex *mtx = new std::mutex;
+    sgx_spinlock_t *mtx = new sgx_spinlock_t;
 
 	if (!mtx)
 	{
 		return CKR_HOST_MEMORY;
 	}
 
-	*newMutex = mtx;
+    *mtx = SGX_SPINLOCK_INITIALIZER;
+
+    *newMutex = reinterpret_cast<void*>(const_cast<uint32_t*>(mtx));
 
 	return CKR_OK;
 }
 
 CK_RV OSDestroyMutex(CK_VOID_PTR inMutex)
 {
-    delete reinterpret_cast<std::mutex*>(inMutex);
+    delete reinterpret_cast<sgx_spinlock_t*>(inMutex);
 	return CKR_OK;
 }
 
@@ -303,7 +305,7 @@ CK_RV OSLockMutex(CK_VOID_PTR inMutex)
 		return CKR_ARGUMENTS_BAD;
 	}
 
-    reinterpret_cast<std::mutex*>(inMutex)->lock();
+    sgx_spin_lock(reinterpret_cast<sgx_spinlock_t*>(inMutex));
 
 	return CKR_OK;
 }
@@ -315,7 +317,7 @@ CK_RV OSUnlockMutex(CK_VOID_PTR inMutex)
 		return CKR_ARGUMENTS_BAD;
 	}
 
-    reinterpret_cast<std::mutex*>(inMutex)->unlock();
+    sgx_spin_unlock(reinterpret_cast<sgx_spinlock_t*>(inMutex));
 
 	return CKR_OK;
 }
